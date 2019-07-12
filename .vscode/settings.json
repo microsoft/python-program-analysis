@@ -1,0 +1,6 @@
+{
+	"editor.insertSpaces": false,
+	"python.pythonPath": "C:\\Users\\rdeline\\AppData\\Local\\Continuum\\anaconda3\\python.exe",
+	"python.formatting.provider": "yapf",
+	"typescript.tsdk": "node_modules\\typescript\\lib"
+}

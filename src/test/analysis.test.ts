@@ -26,7 +26,7 @@ describe('detects dataflow dependencies', () => {
 		expect(deps).to.deep.include([2, 1]);
 	});
 
-	it('handle multiple statements per line', () => {
+	it('handles multiple statements per line', () => {
 		let deps = analyzeLineDeps('a = 1', 'b = a; c = b', 'd = c');
 		expect(deps).to.deep.include([2, 1]);
 		expect(deps).to.deep.include([3, 2]);
@@ -36,6 +36,12 @@ describe('detects dataflow dependencies', () => {
 		let deps = analyzeLineDeps('a = 2', 'a.prop = 3', 'a = 4', 'b = a');
 		expect(deps).to.deep.include([4, 3]);
 		expect(deps).to.not.deep.include([4, 1]);
+	});
+
+	xit('handles augmenting assignment', () => {
+		let deps = analyzeLineDeps('a = 2', 'a += 3');
+		expect(deps).to.deep.include([2, 1]);
+		expect(deps).to.deep.include([2, 2]);
 	});
 
 	it('links between statements, not symbol locations', () => {
@@ -195,7 +201,7 @@ describe('getDefs', () => {
 				location: {
 					first_line: 1,
 					first_column: 0,
-					last_line: 3,
+					last_line: 4,
 					last_column: -1,
 				},
 			});
@@ -213,7 +219,7 @@ describe('getDefs', () => {
 				location: {
 					first_line: 1,
 					first_column: 0,
-					last_line: 4,
+					last_line: 5,
 					last_column: -1,
 				},
 			});
@@ -352,6 +358,11 @@ describe('getUses', () => {
 		it('for undefined symbols in functions', () => {
 			let uses = getUseNames('def func(arg):', '    print(a)');
 			expect(uses).to.include('a');
+		});
+
+		it('handles augassign', () => {
+			let uses = getUseNames('x -= 1');
+			expect(uses).to.include('x');
 		});
 	});
 

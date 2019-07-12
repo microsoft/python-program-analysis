@@ -4,12 +4,12 @@ import { SyntaxNode, IArgument, IParam } from "./python-parser";
 const comma = ', ';
 
 function printTabbed(node: SyntaxNode, tabLevel: number): string {
-	const tabs = '\n' + ' '.repeat(4 * tabLevel);
+	const tabs = ' '.repeat(4 * tabLevel);
 	switch (node.type) {
 		case 'assert':
 			return tabs + 'assert ' + printNode(node.cond);
 		case 'assign':
-			return tabs + commaSep(node.targets) + ' = ' + commaSep(node.sources);
+			return tabs + commaSep(node.targets) + ' ' + (node.op || '=') + ' ' + commaSep(node.sources);
 		case 'binop':
 			return '(' + printNode(node.left) + node.op + printNode(node.right) + ')';
 		case 'break':
@@ -126,7 +126,7 @@ function commaSep(items: SyntaxNode[]): string {
 
 function lines(items: SyntaxNode[], tabLevel: number): string {
 	return items.map(i => printTabbed(i, tabLevel))
-		.join(tabLevel === 0 ? '\n' : ''); // seperate top-level definitons with an extra newline
+		.join(tabLevel === 0 ? '\n\n' : '\n'); // seperate top-level definitons with an extra newline
 }
 
 export function printNode(node: SyntaxNode): string {

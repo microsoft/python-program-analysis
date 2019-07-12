@@ -25,6 +25,8 @@ export function parse(program: string): Module {
 		// eliminate byte order mark
 		program = program.slice(1);
 	}
+	// The parser is fussy about line endings, so remote 
+	// carriage returns and make sure we end with a newline.
 	return python3Parse(program.replace(/\r/g, '') + '\n');
 }
 

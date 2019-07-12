@@ -103,19 +103,9 @@ export class DataflowAnalyzer {
 						undefinedRefs.add(def);
 					}
 				}
-				// Only add uses that aren't actually defs.
 				for (let use of usedHere.items) {
-					if (
-						!definedHere.items.some(
-							def =>
-								def.level == ReferenceType.DEFINITION &&
-								def.name == use.name &&
-								sameLocation(def.location, use.location)
-						)
-					) {
-						statementRefs[ReferenceType.USE].add(use);
-						undefinedRefs.add(use);
-					}
+					statementRefs[ReferenceType.USE].add(use);
+					undefinedRefs.add(use);
 				}
 
 				// Get all new dataflow dependencies.
@@ -306,11 +296,7 @@ export class DataflowAnalyzer {
 				let defCfg = new ControlFlowGraph(statement);
 				let argNames = new StringSet(
 					...statement.params
-						.map(p => {
-							if (p && p instanceof Array && p.length > 0 && p[0].name) {
-								return p[0].name;
-							}
-						})
+						.map(p => p.name)
 						.filter(n => n != undefined)
 				);
 				let undefinedRefs = this.analyze(
