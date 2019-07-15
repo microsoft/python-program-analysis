@@ -5,7 +5,7 @@
 	"version": "0.0.1",
 	"scripts": {
 		"build": "npm run build:parser && tsc",
-		"build:parser": "node ./node_modules/jison/lib/cli.js --outfile src/python/python3.js src/python/python3.jison",
+		"build:parser": "node ./node_modules/jison/lib/cli.js --outfile src/python3.js src/python3.jison",
 		"compile": "tsc -p ./",
 		"test": "karma start src/test/karma.conf.js",
 		"test:debug": "karma start src/test/karma.debug.conf.js",
