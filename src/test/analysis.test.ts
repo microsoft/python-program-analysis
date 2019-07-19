@@ -38,10 +38,9 @@ describe('detects dataflow dependencies', () => {
 		expect(deps).to.not.deep.include([4, 1]);
 	});
 
-	xit('handles augmenting assignment', () => {
+	it('handles augmenting assignment', () => {
 		let deps = analyzeLineDeps('a = 2', 'a += 3');
 		expect(deps).to.deep.include([2, 1]);
-		expect(deps).to.deep.include([2, 2]);
 	});
 
 	it('links between statements, not symbol locations', () => {
