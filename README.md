@@ -1,4 +1,4 @@
-# python-analysis
+# python-program-analysis
 
 A Typescript library for parsing Python 3 and doing basic program analysis, 
 like forming control-flow graphs and def-use chains.
