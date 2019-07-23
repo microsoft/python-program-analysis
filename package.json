@@ -2,7 +2,7 @@
 	"name": "@msrvida/python-program-analysis",
 	"displayName": "Python parsing and program analysis",
 	"main": "./lib/index.js",
-	"version": "0.0.1",
+	"version": "0.0.3",
 	"repository": "http://www.github.com/microsoft/python-program-analysis",
 	"scripts": {
 		"build": "npm run build:parser && tsc && tsc -m es6 --outDir lib-esm && webpack",
