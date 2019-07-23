@@ -29,7 +29,7 @@ describe('python parser', () => {
     let mod = parse('{k: v for (k, v) in d.items()}\n');
     expect(mod).to.exist;
     expect(mod.code).to.have.length;
-    let node = mod.code[0] as py.Dict;
+    let node = mod.code[0] as py.DictExpr;
     expect(node.entries.length).to.equal(1);
     expect(node.comp_for).not.to.be.undefined;
   });

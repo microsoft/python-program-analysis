@@ -64,9 +64,9 @@ export type SyntaxNode =
   | BinaryOperator
   | Starred
   | Tuple
-  | List
-  | Set
-  | Dict
+  | ListExpr
+  | SetExpr
+  | DictExpr
   | Name
   | Literal
   | Class;
@@ -386,14 +386,14 @@ export interface Tuple extends Locatable {
 
 export const LIST = 'list';
 
-export interface List extends Locatable {
+export interface ListExpr extends Locatable {
   type: typeof LIST;
   items: SyntaxNode[];
 }
 
 export const SET = 'set';
 
-export interface Set extends Locatable {
+export interface SetExpr extends Locatable {
   type: typeof SET;
   entries: SyntaxNode[];
   comp_for?: SyntaxNode[];
@@ -401,7 +401,7 @@ export interface Set extends Locatable {
 
 export const DICT = 'dict';
 
-export interface Dict extends Locatable {
+export interface DictExpr extends Locatable {
   type: typeof DICT;
   entries: { k: SyntaxNode; v: SyntaxNode }[];
   comp_for?: SyntaxNode[];
