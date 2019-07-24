@@ -6,7 +6,7 @@ import { printNode } from './printNode';
  */
 let yy = parser.yy as any;
 let oldParseError = yy.parseError;
-oldParseError = function(text: String, hash: any) {
+oldParseError = function (text: String, hash: any) {
   this.indents = [0];
   this.indent = 0;
   this.dedents = 0;
@@ -71,11 +71,16 @@ export type SyntaxNode =
   | Literal
   | Class;
 
-export interface Location {
+/// Must be consistent with Jison (Bison) naming conventions
+interface JisonLocation {
   first_line: number;
   first_column: number;
   last_line: number;
   last_column: number;
+}
+
+export interface Location extends JisonLocation {
+  path?: string; // useful for error messages and other tracking
 }
 
 // loc2 is inside loc1

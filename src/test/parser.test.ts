@@ -31,7 +31,7 @@ describe('python parser', () => {
     expect(mod.code).to.have.length;
     let node = mod.code[0] as py.DictExpr;
     expect(node.entries.length).to.equal(1);
-    expect(node.comp_for).not.to.be.undefined;
+    expect(node.comp_for).to.exist;
   });
 
   it('can parse line continuations', () => {
