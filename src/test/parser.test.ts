@@ -13,6 +13,12 @@ describe('python parser', () => {
     parse('obj.prop\n');
   });
 
+  it('can parse comments', () => {
+    const tree = parse('#\n');
+    expect(tree.code).to.be.an('array');
+    expect(tree.code.length).to.equal(0);
+  });
+
   it('can parse scientific notation', () => {
     parse('1e5\n');
   });
