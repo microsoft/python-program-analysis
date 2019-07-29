@@ -132,6 +132,8 @@ function printTabbed(node: SyntaxNode, tabLevel: number): string {
         ': ' +
         printNode(node.code)
       );
+    case 'list':
+      return '[' + node.items.map(item => printNode(item)).join(comma) + ']';
     case 'literal':
       return typeof node.value === 'string' && node.value.indexOf('\n') >= 0
         ? '""' + node.value + '""'
