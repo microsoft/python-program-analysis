@@ -3,13 +3,13 @@
 	"displayName": "Python parsing and program analysis",
 	"main": "./lib/index.js",
 	"license": "MIT",
-	"version": "0.0.8",
+	"version": "0.0.11",
 	"repository": "http://www.github.com/microsoft/python-program-analysis",
 	"scripts": {
 		"build": "npm run build:parser && tsc && tsc -m es6 --outDir lib-esm && webpack",
 		"build:parser": "node ./node_modules/jison/lib/cli.js --outfile src/python3.js src/python3.jison && cpx src/python3.js lib && cpx src/python3.js lib-esm",
 		"format:all": "prettier --single-quote --trailing-comma=es5 --write \"{src,style}/**/*.{css,js,ts}\"",
-		"clean": "rimraf _bundles lib lib-esm",
+		"clean": "rimraf lib lib-esm node_modules",
 		"compile": "tsc -p ./",
 		"compile:esm": "tsc -m es6 --outDir lib-esm -p ./",
 		"test": "karma start src/test/karma.conf.js",
@@ -22,6 +22,7 @@
 		"@types/mocha": "^5.2.4",
 		"chai": "^4.2.0",
 		"cpx": "^1.5.0",
+		"css-loader": "^1.0.1",
 		"jison": "^0.4.18",
 		"karma": "^4.2.0",
 		"karma-chai": "^0.1.0",
@@ -31,6 +32,7 @@
 		"mocha": "^6.2.0",
 		"prettier": "1.17.0",
 		"rimraf": "^2.6.3",
+		"style-loader": "^0.21.0",
 		"ts-loader": "^6.0.1",
 		"tslint": "^5.11.1",
 		"tslint-microsoft-contrib": "^6.2.0",
@@ -39,9 +41,9 @@
 		"webpack-cli": "^3.3.6"
 	},
 	"dependencies": {
-		"@jupyterlab/cells": "^1.0.1",
-		"@jupyterlab/coreutils": "^3.0.0",
-		"@jupyterlab/rendermime": "^1.0.1",
+		"@jupyterlab/cells": "^0.19.1",
+		"@jupyterlab/coreutils": "^2.2.1",
+		"@jupyterlab/rendermime": "^0.19.1",
 		"js-yaml": "^3.13.1"
 	}
 }
