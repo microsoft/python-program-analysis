@@ -3,7 +3,7 @@
 	"displayName": "Python parsing and program analysis",
 	"main": "./lib/index.js",
 	"license": "MIT",
-	"version": "0.0.6",
+	"version": "0.0.8",
 	"repository": "http://www.github.com/microsoft/python-program-analysis",
 	"scripts": {
 		"build": "npm run build:parser && tsc && tsc -m es6 --outDir lib-esm && webpack",
