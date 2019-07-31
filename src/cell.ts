@@ -6,7 +6,7 @@ import { IOutputModel } from '@jupyterlab/rendermime';
 /**
  * Generic interface for accessing data about a code cell.
  */
-export interface JupyterCell {
+export interface Cell {
   /**
    * The ID assigned to a cell by Jupyter Lab. This ID may change each time the notebook is open,
    * due to the implementation of Jupyter Lab.
@@ -60,13 +60,13 @@ export interface JupyterCell {
   /**
    * Create a deep copy of the cell.
    */
-  deepCopy: () => JupyterCell;
+  deepCopy: () => Cell;
 
   /**
    * Create a new cell from this cell. The new cell will have null execution counts, and a new
    * ID and persistent ID.
    */
-  copyToNewCell: () => JupyterCell;
+  copyToNewCell: () => Cell;
 
   /**
    * Serialize this ICell to JSON that can be stored in a notebook file, or which can be used to
@@ -75,14 +75,14 @@ export interface JupyterCell {
   serialize: () => nbformat.ICodeCell;
 }
 
-export function instanceOfICell(object: any): object is JupyterCell {
+export function instanceOfICell(object: any): object is Cell {
   return object && typeof object == 'object' && 'is_cell' in object;
 }
 
 /**
  * Abstract class for accessing cell data.
  */
-export abstract class AbstractCell implements JupyterCell {
+export abstract class AbstractCell implements Cell {
   abstract is_cell: boolean;
   abstract id: string;
   abstract executionCount: number;
@@ -121,7 +121,7 @@ export abstract class AbstractCell implements JupyterCell {
     };
   }
 
-  copyToNewCell(): JupyterCell {
+  copyToNewCell(): Cell {
     let clonedOutputs = this.outputs.map(output => {
       let clone = JSON.parse(JSON.stringify(output)) as nbformat.IOutput;
       if (nbformat.isExecuteResult(clone)) {

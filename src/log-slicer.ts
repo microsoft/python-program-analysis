@@ -1,5 +1,5 @@
 import { Signal } from '@phosphor/signaling';
-import { JupyterCell } from './cell';
+import { Cell } from './cell';
 import { CellSlice } from './cellslice';
 import { DataflowAnalyzer } from './data-flow';
 import { CellProgram, ProgramBuilder } from './program-builder';
@@ -9,10 +9,10 @@ import { LocationSet, slice } from './slice';
  * A record of when a cell was executed.
  */
 export class CellExecution {
-  readonly cell: JupyterCell;
+  readonly cell: Cell;
   readonly executionTime: Date;
 
-  constructor(cell: JupyterCell, executionTime: Date) {
+  constructor(cell: Cell, executionTime: Date) {
     this.cell = cell;
     this.executionTime = executionTime;
   }
@@ -85,7 +85,7 @@ export class ExecutionLogSlicer {
    * Log that a cell has just been executed. The execution time for this cell will be stored
    * as the moment at which this method is called.
    */
-  public logExecution(cell: JupyterCell) {
+  public logExecution(cell: Cell) {
     let cellExecution = new CellExecution(cell, new Date());
     this.addExecutionToLog(cellExecution);
   }
@@ -114,7 +114,7 @@ export class ExecutionLogSlicer {
    * Get slice for the latest execution of a cell.
    */
   public sliceLatestExecution(
-    cell: JupyterCell,
+    cell: Cell,
     seedLocations?: LocationSet
   ): SlicedExecution {
     // XXX: This computes more than it has to, performing a slice on each execution of a cell
@@ -127,7 +127,7 @@ export class ExecutionLogSlicer {
    * Relevant line numbers are relative to the cell's start line (starting at first line = 0).
    */
   public sliceAllExecutions(
-    cell: JupyterCell,
+    cell: Cell,
     pSeedLocations?: LocationSet
   ): SlicedExecution[] {
     // Make a map from cells to their execution times.
@@ -188,7 +188,7 @@ export class ExecutionLogSlicer {
         let cellSliceLocations: {
           [executionEventId: string]: LocationSet;
         } = {};
-        let cellOrder: JupyterCell[] = [];
+        let cellOrder: Cell[] = [];
         sliceLocations.forEach(location => {
           let sliceCell = program.lineToCellMap[location.first_line];
           let sliceCellLines =
@@ -234,7 +234,7 @@ export class ExecutionLogSlicer {
   /**
    * Get the cell program (tree, defs, uses) for a cell.
    */
-  getCellProgram(cell: JupyterCell): CellProgram {
+  getCellProgram(cell: Cell): CellProgram {
     return this._programBuilder.getCellProgram(cell);
   }
 }

@@ -1,13 +1,13 @@
 import { expect } from 'chai';
 import { ProgramBuilder } from '../program-builder';
-import { JupyterCell, LogCell } from '../cell';
+import { Cell, LogCell } from '../cell';
 
 describe('program builder', () => {
   function createCell(
     executionEventId: string,
     text: string,
     executionCount?: number
-  ): JupyterCell {
+  ): Cell {
     return new LogCell({ executionEventId, text, executionCount });
   }
 

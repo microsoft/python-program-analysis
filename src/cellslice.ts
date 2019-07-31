@@ -1,11 +1,11 @@
-import { JupyterCell } from './cell';
+import { Cell } from './cell';
 import { LocationSet } from './slice';
 
 export class CellSlice {
   /**
    * Construct an instance of a cell slice.
    */
-  constructor(cell: JupyterCell, slice: LocationSet, executionTime?: Date) {
+  constructor(cell: Cell, slice: LocationSet, executionTime?: Date) {
     this.cell = cell;
     this._slice = slice;
     this.executionTime = executionTime;
@@ -63,7 +63,7 @@ export class CellSlice {
     this._slice = slice;
   }
 
-  readonly cell: JupyterCell;
+  readonly cell: Cell;
   readonly executionTime: Date;
   private _slice: LocationSet;
 }

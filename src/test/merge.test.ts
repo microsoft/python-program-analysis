@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import { SlicedExecution } from '../log-slicer';
 import { LocationSet } from '../slice';
-import { JupyterCell, LogCell } from '../cell';
+import { Cell, LogCell } from '../cell';
 import { CellSlice } from '../cellslice';
 
 describe('SlicedExecution', () => {
@@ -10,12 +10,12 @@ describe('SlicedExecution', () => {
     text: string,
     executionCount?: number,
     id?: string
-  ): JupyterCell {
+  ): Cell {
     if (executionCount === undefined) executionCount = 1;
     return new LogCell({ executionCount, text, executionEventId, id });
   }
 
-  function cellSlice(cell: JupyterCell, slice: LocationSet): CellSlice {
+  function cellSlice(cell: Cell, slice: LocationSet): CellSlice {
     return new CellSlice(cell, slice);
   }
 

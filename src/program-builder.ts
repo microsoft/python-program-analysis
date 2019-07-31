@@ -1,4 +1,4 @@
-import { JupyterCell } from './cell';
+import { Cell } from './cell';
 import * as ast from './python-parser';
 import { DataflowAnalyzer, Ref } from './data-flow';
 import { MagicsRewriter } from './rewrite-magics';
@@ -8,7 +8,7 @@ import { NumberSet } from './set';
  * Maps to find out what line numbers over a program correspond to what cells.
  */
 export type CellToLineMap = { [cellExecutionEventId: string]: NumberSet };
-export type LineToCellMap = { [line: number]: JupyterCell };
+export type LineToCellMap = { [line: number]: Cell };
 
 /**
  * A program built from cells.
@@ -43,7 +43,7 @@ export class CellProgram {
    * Construct a cell program
    */
   constructor(
-    cell: JupyterCell,
+    cell: Cell,
     statements: ast.SyntaxNode[],
     defs: Ref[],
     uses: Ref[],
@@ -56,7 +56,7 @@ export class CellProgram {
     this.hasError = hasError;
   }
 
-  readonly cell: JupyterCell;
+  readonly cell: Cell;
   readonly statements: ast.SyntaxNode[];
   readonly defs: Ref[];
   readonly uses: Ref[];
@@ -78,7 +78,7 @@ export class ProgramBuilder {
   /**
    * Add cells to the program builder.
    */
-  add(...cells: JupyterCell[]) {
+  add(...cells: Cell[]) {
     for (let cell of cells) {
       // Proactively try to parse and find defs and uses in each block.
       // If there is a failure, discard that cell.
@@ -224,7 +224,7 @@ export class ProgramBuilder {
     return new Program(code, tree, cellToLineMap, lineToCellMap);
   }
 
-  getCellProgram(cell: JupyterCell): CellProgram {
+  getCellProgram(cell: Cell): CellProgram {
     let matchingPrograms = this._cellPrograms.filter(
       cp => cp.cell.executionEventId == cell.executionEventId
     );
