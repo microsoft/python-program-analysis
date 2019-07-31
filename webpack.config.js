@@ -4,10 +4,11 @@ module.exports = {
 	mode: 'development',
 	entry: path.resolve(__dirname, 'src/index.ts'),
 	output: {
-		path: path.resolve(__dirname, 'lib'),
+		path: path.resolve(__dirname, 'dist/umd'),
 		filename: 'index.js',
 		library: '',
-		libraryTarget: 'commonjs'
+		libraryTarget: 'commonjs',
+		globalObject: 'this'
 	},
 	node: {
 		fs: 'empty',

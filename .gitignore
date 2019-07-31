@@ -1,4 +1,3 @@
 node_modules
-lib
-lib-esm
+dist
 src/python3.js
