@@ -1124,21 +1124,21 @@ subscriptlist0
 subscript
     : test
     | test ':' test sliceop
-        { $$ = { type: 'slice', start: $1, stop: $3, step: $4 } }
+        { $$ = { type: 'slice', start: $1, stop: $3, step: $4, location: @$ } }
     | test ':' test
-        { $$ = { type: 'slice', start: $1, stop: $3 } }
+        { $$ = { type: 'slice', start: $1, stop: $3, location: @$ } }
     | test ':' sliceop
-        { $$ = { type: 'slice', start: $1, step: $3 } }
+        { $$ = { type: 'slice', start: $1, step: $3, location: @$ } }
     | test ':'
-        { $$ = { type: 'slice', start: $1 } }
+        { $$ = { type: 'slice', start: $1, location: @$ } }
     | ':' test sliceop
-        { $$ = { type: 'slice', stop: $2, step: $3 } }
+        { $$ = { type: 'slice', stop: $2, step: $3, location: @$ } }
     | ':' test
-        { $$ = { type: 'slice', stop: $2 } }
+        { $$ = { type: 'slice', stop: $2, location: @$ } }
     | ':' sliceop
-        { $$ = { type: 'slice', step: $2 } }
+        { $$ = { type: 'slice', step: $2, location: @$ } }
     | ':'
-        { $$ = { type: 'slice' } }
+        { $$ = { type: 'slice', location: @$ } }
     ;
 
 // sliceop: ':' [test]
@@ -1203,21 +1203,21 @@ testlist0
 //   (test (comp_for | (',' test)* [','])) )
 dictorsetmaker
     : test ':' test
-        { $$ = { type: 'dict', entries: [{ k: $1, v: $3 }] } }
+        { $$ = { type: 'dict', entries: [{ k: $1, v: $3 }], location: @$ } }
     | test ':' test ','
-        { $$ = { type: 'dict', entries: [{ k: $1, v: $3 }] } }
+        { $$ = { type: 'dict', entries: [{ k: $1, v: $3 }], location: @$ } }
     | test ':' test comp_for
-        { $$ = { type: 'dict', entries: [{ k: $1, v: $3 }], comp_for: $4 } }
+        { $$ = { type: 'dict', entries: [{ k: $1, v: $3 }], comp_for: $4, location: @$ } }
     | test ':' test dictmaker
-        { $$ = { type: 'dict', entries: [{ k: $1, v: $3 }].concat( $4 ) } }
+        { $$ = { type: 'dict', entries: [{ k: $1, v: $3 }].concat( $4 ), location: @$ } }
     | test
-        { $$ = { type: 'set', entries: [ $1 ] } }
+        { $$ = { type: 'set', entries: [ $1 ], location: @$ } }
     | test ','
-        { $$ = { type: 'set', entries: [ $1 ] } }
+        { $$ = { type: 'set', entries: [ $1 ], location: @$ } }
     | test comp_for
-        { $$ = { type: 'set', entries: [ $1 ], comp_for: $2 } }
+        { $$ = { type: 'set', entries: [ $1 ], comp_for: $2, location: @$ } }
     | test setmaker
-        { $$ = { type: 'set', entries: [ $1 ].concat( $2 ) } }
+        { $$ = { type: 'set', entries: [ $1 ].concat( $2 ), location: @$ } }
     ;
 
 dictmaker
@@ -1273,15 +1273,15 @@ arglist0
 // argument: test [comp_for] | test '=' test
 argument
     : test
-        { $$ = { type: 'arg', actual: $1 } }
+        { $$ = { type: 'arg', actual: $1, location: @$ } }
     | test comp_for
-        { $$ = { type: 'arg', actual: $1, loop: $2 } }
+        { $$ = { type: 'arg', actual: $1, loop: $2, location: @$ } }
     | test '=' test
-        { $$ = { type: 'arg', keyword: $1, actual: $3 } }
+        { $$ = { type: 'arg', keyword: $1, actual: $3, location: @$ } }
     | '**' test
-        { $$ = { type: 'arg', kwargs: true, actual: $2 } }
+        { $$ = { type: 'arg', kwargs: true, actual: $2, location: @$ } }
     | '*' test
-        { $$ = { type: 'arg', varargs: true, actual: $2 } }
+        { $$ = { type: 'arg', varargs: true, actual: $2, location: @$ } }
     ;
 
 // comp_iter: comp_for | comp_if
