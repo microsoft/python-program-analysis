@@ -5,7 +5,7 @@
 	"types": "./dist/es5/index.d.ts",
 	"license": "MIT",
 	"files": ["dist", "cfg.png"],
-	"version": "0.1.4",
+	"version": "0.1.5",
 	"repository": "http://www.github.com/microsoft/python-program-analysis",
 	"scripts": {
 		"build": "npm run build:parser && tsc && tsc -m es6 --outDir dist/es6 && webpack",
