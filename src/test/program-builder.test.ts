@@ -102,6 +102,15 @@ describe('program builder', () => {
     expect(code).to.equal(['print(1)', 'print(3)', ''].join('\n'));
   });
 
+  it('doesn\'t skip cells with array slices', () => {
+    programBuilder.add(
+      createCell('id1', 'array[0:1]'),
+      createCell('id2', 'print(x)')
+    );
+    let code = programBuilder.buildTo('id2').text;
+    expect(code).to.equal("array[0:1]\nprint(x)\n");
+  });
+
   it('skips cells that were executed in prior kernels', () => {
     programBuilder.add(
       createCell('id1', 'print(1)', 1),
