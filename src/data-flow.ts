@@ -555,6 +555,15 @@ class CallNamesListener implements ast.WalkListener {
     if (type == ast.NAME) {
       for (let ancestor of ancestors) {
         if (this._subtreesToProcess.indexOf(ancestor) !== -1) {
+          /*
+           * Don't include names of functions.
+           */
+          if (ancestors.length > 1) {
+            let parent = ancestors[ancestors.length - 2];
+            if (parent.type == ast.CALL && parent.func == node) {
+              break;
+            }
+          }
           this.defs.add({
             type: SymbolType.MUTATION,
             level: ReferenceType.UPDATE,

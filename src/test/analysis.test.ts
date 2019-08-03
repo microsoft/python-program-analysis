@@ -350,6 +350,11 @@ describe('getDefs', () => {
       let defs = getDefNamesFromStatement('a + func()');
       expect(defs).to.deep.equal([]);
     });
+		
+    it('for functions called early in a call chain', () => {
+      let defs = getDefNamesFromStatement('func().func()');
+      expect(defs).to.deep.equal([]);
+    });
   });
 });
 
