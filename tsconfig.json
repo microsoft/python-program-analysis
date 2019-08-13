@@ -3,11 +3,16 @@
 		"module": "commonjs",
 		"target": "es5",
 		"outDir": "dist/es5",
-		"lib": [ "es2015", "dom" ],
+		"lib": [
+			"es2015",
+			"dom"
+		],
 		"sourceMap": true,
 		"declaration": true,
 		"rootDir": "src",
-		"moduleResolution": "node"
+		"moduleResolution": "node",
+		"resolveJsonModule": true,
+		"esModuleInterop": true
 	},
 	"exclude": [
 		".vscode-test",
