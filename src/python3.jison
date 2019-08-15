@@ -526,6 +526,7 @@ import_from0
 
 import_from_tail
     : '*' // todo: behavior not defined
+        { $$ = [{ path: '*' }] }
     | '(' import_as_names ')'
         { $$ = $2 }
     | import_as_names

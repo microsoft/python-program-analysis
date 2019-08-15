@@ -8,9 +8,10 @@ import {
   ReferenceType,
   RefSet,
   SymbolType,
+  SymbolTable,
 } from '../data-flow';
 import { Set, StringSet } from '../set';
-import { SliceConfiguration } from '../slice-config';
+import { ModuleMap, GlobalModuleMap } from '../specs';
 import { printNode } from '../printNode';
 
 describe('detects dataflow dependencies', () => {
@@ -22,7 +23,7 @@ describe('detects dataflow dependencies', () => {
   }
 
   function analyzeLineDeps(...codeLines: string[]): [number, number][] {
-    return analyze(...codeLines).items.map(dep=> [dep.toNode.location.first_line, dep.fromNode.location.first_line]);
+    return analyze(...codeLines).items.map(dep => [dep.toNode.location.first_line, dep.fromNode.location.first_line]);
   }
 
   it('from variable uses to names', () => {
@@ -152,28 +153,28 @@ describe('getDefs', () => {
     let analyzer = new DataflowAnalyzer();
     return new RefSet().union(
       ...module.code.map((stmt: SyntaxNode) => {
-        return analyzer.getDefs(stmt, { moduleNames: new StringSet() });
+        return analyzer.getDefs(stmt, new SymbolTable(GlobalModuleMap));
       })
     ).items;
   }
 
   function getDefsFromStatement(
     code: string,
-    sliceConfiguration?: SliceConfiguration
+    mmap?: ModuleMap
   ): Ref[] {
-    sliceConfiguration = sliceConfiguration || [];
+    mmap = mmap || GlobalModuleMap;
     code = code + '\n'; // programs need to end with newline
     let mod = parse(code);
-    let analyzer = new DataflowAnalyzer(sliceConfiguration);
-    return analyzer.getDefs(mod.code[0], { moduleNames: new StringSet() })
+    let analyzer = new DataflowAnalyzer(mmap);
+    return analyzer.getDefs(mod.code[0], new SymbolTable(mmap))
       .items;
   }
 
   function getDefNamesFromStatement(
     code: string,
-    sliceConfiguration?: SliceConfiguration
+    mmap?: ModuleMap
   ) {
-    return getDefsFromStatement(code, sliceConfiguration).map(def => def.name);
+    return getDefsFromStatement(code, mmap).map(def => def.name);
   }
 
   describe('detects definitions', () => {
@@ -304,44 +305,36 @@ describe('getDefs', () => {
 
     describe('; given a slice config', () => {
       it('can ignore all arguments', () => {
-        let defs = getDefsFromStatement('func(a, b, c)', [
-          {
-            functionName: 'func',
-            doesNotModify: ['ARGUMENTS'],
-          },
-        ]);
+        let defs = getDefsFromStatement('func(a, b, c)',
+          { __builtin__: { noSideEffects: ['func'] } });
         expect(defs).to.deep.equal([]);
       });
 
-      it('can ignore the object functions are called on', () => {
-        let defs = getDefsFromStatement('obj.func()', [
-          {
-            functionName: 'func',
-            doesNotModify: ['OBJECT'],
-          },
-        ]);
+      it('assumes arguments have side-effects, without a spec', () => {
+        let defs = getDefsFromStatement('func(a, b, c)',
+          { __builtin__: { noSideEffects: [] } });
+        expect(defs).to.exist;
+        expect(defs.length).to.equal(3);
+        const names = defs.map(d => d.name);
+        expect(names).to.include('a');
+        expect(names).to.include('b');
+        expect(names).to.include('c');
+      });
+
+      xit('can ignore the object functions are called on', () => {
+        let defs = getDefsFromStatement(['x=C()', 'x.m()', ''].join('\n'),
+          { __builtin__: { types: { C: { noSideEffects: ['m'] } } } });
         expect(defs).to.deep.equal([]);
       });
 
-      it('can ignore positional arguments a function is called with', () => {
-        let defs = getDefNamesFromStatement('func(a)', [
-          {
-            functionName: 'func',
-            doesNotModify: [0],
-          },
-        ]);
-        expect(defs).to.not.include('a');
+      it('assumes method call affects self, without a spec', () => {
+        let defs = getDefsFromStatement(['x=C()', 'x.m()', ''].join('\n'),
+          { __builtin__: {} });
+        expect(defs).to.exist;
+        expect(defs.length).to.equal(1);
+        expect(defs[0].name).to.equal('x');
       });
 
-      it('can ignore keyword arguments a function is called with', () => {
-        let defs = getDefNamesFromStatement('func(a=var)', [
-          {
-            functionName: 'func',
-            doesNotModify: ['a'],
-          },
-        ]);
-        expect(defs).to.deep.equal([]);
-      });
     });
   });
 
@@ -359,7 +352,7 @@ describe('getUses', () => {
     let mod = parse(code);
     let analyzer = new DataflowAnalyzer();
     return analyzer
-      .getUses(mod.code[0], { moduleNames: new StringSet() })
+      .getUses(mod.code[0], new SymbolTable(GlobalModuleMap))
       .items.map(use => use.name);
   }
 

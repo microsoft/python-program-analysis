@@ -1,0 +1,28 @@
+{
+	"sklearn": {
+		"modules": {
+			"cluster": {
+				"types": {
+					"KMeans": {
+						"noSideEffects": [
+							"predict",
+							"score",
+							"transform"
+						],
+						"sideEffects": {
+							"fit": {
+								"0": "update"
+							},
+							"fit_predict": {
+								"0": "update"
+							},
+							"fit_transform": {
+								"0": "update"
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

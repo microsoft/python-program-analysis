@@ -1,0 +1,83 @@
+	{
+		"__builtin__": {
+			"noSideEffects": [
+				"credits",
+				"dict",
+				"dir",
+				"divmod",
+				"enumerate",
+				"eval",
+				"exec",
+				"exit",
+				"float",
+				"format",
+				"frozenset",
+				"getattr",
+				"globals",
+				"hasattr",
+				"hash",
+				"help",
+				"hex",
+				"id",
+				"input",
+				"int",
+				"isinstance",
+				"issubclass",
+				"iter",
+				"len",
+				"license",
+				"list",
+				"locals",
+				"max",
+				"memoryview",
+				"min",
+				"next",
+				"object",
+				"oct",
+				"open",
+				"ord",
+				"pow",
+				"print",
+				"property",
+				"quit",
+				"range",
+				"repr",
+				"reversed",
+				"round",
+				"set",
+				"slice",
+				"sorted",
+				"staticmethod",
+				"str",
+				"sum",
+				"super",
+				"tuple",
+				"type",
+				"vars",
+				"zip"
+			],
+			"sideEffects": {
+				"delattr": {
+					"1": "update"
+				},
+				"filter": {
+					"1": "higher-order"
+				},
+				"map": {
+					"1": "higher-order"
+				},
+				"setattr": {
+					"1": "update"
+				}
+			},
+			"types": {
+				"BaseException": {
+					"sideEffects": {
+						"with_traceback": {
+							"0": "update"
+						}
+					}
+				}
+			}
+		}
+	}

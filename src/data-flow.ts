@@ -1,7 +1,7 @@
 import * as ast from './python-parser';
 import { Block, ControlFlowGraph } from './control-flow';
 import { Set, StringSet } from './set';
-import { SliceConfiguration } from './slice-config';
+import { GlobalModuleMap, ModuleMap, FunctionDescription, TypeDescription, ModuleDescription } from './specs';
 
 /**
  * Use a shared dataflow analyzer object for all dataflow analysis / querying for defs and uses.
@@ -9,8 +9,8 @@ import { SliceConfiguration } from './slice-config';
  * For caching to work, statements must be annotated with a cell's ID and execution count.
  */
 export class DataflowAnalyzer {
-  constructor(sliceConfiguration?: SliceConfiguration) {
-    this._sliceConfiguration = sliceConfiguration || [];
+  constructor(moduleMap?: ModuleMap) {
+    this._moduleMap = moduleMap || GlobalModuleMap;
   }
 
   private statementLocationKey(statement: ast.SyntaxNode) {
@@ -29,7 +29,7 @@ export class DataflowAnalyzer {
     statement: ast.SyntaxNode,
     symbolTable?: SymbolTable
   ): IDefUseInfo {
-    symbolTable = symbolTable || { moduleNames: new StringSet() };
+    symbolTable = symbolTable || new SymbolTable(this._moduleMap);
     let cacheKey = this.statementLocationKey(statement);
     if (cacheKey != null) {
       if (this._defUsesCache.hasOwnProperty(cacheKey)) {
@@ -48,11 +48,11 @@ export class DataflowAnalyzer {
   // tslint:disable-next-line: max-func-body-length
   analyze(
     cfg: ControlFlowGraph,
-    sliceConfiguration?: SliceConfiguration,
+    moduleMap?: ModuleMap,
     namesDefined?: StringSet
   ): DataflowAnalysisResult {
-    sliceConfiguration = sliceConfiguration || [];
-    let symbolTable: SymbolTable = { moduleNames: new StringSet() };
+    moduleMap = moduleMap || GlobalModuleMap;
+    let symbolTable = new SymbolTable(moduleMap);
     const workQueue: Block[] = cfg.blocks.reverse();
     let undefinedRefs = new RefSet();
 
@@ -178,7 +178,7 @@ export class DataflowAnalyzer {
      * unless otherwise specified in the slice configuration.
      */
     let callNamesListener = new CallNamesListener(
-      this._sliceConfiguration,
+      symbolTable,
       statement
     );
     ast.walk(statement, callNamesListener);
@@ -188,10 +188,12 @@ export class DataflowAnalyzer {
     ast.walk(statement, defAnnotationsListener);
     defs = defs.union(defAnnotationsListener.defs);
 
+
     switch (statement.type) {
       case ast.IMPORT: {
-        const modnames = statement.names.map(i => i.name || i.path);
-        symbolTable.moduleNames.add(...modnames);
+        statement.names.forEach(imp => {
+          const spec = symbolTable.importModule(imp.path);
+        });
         defs.add(
           ...statement.names.map(nameNode => {
             return {
@@ -206,13 +208,8 @@ export class DataflowAnalyzer {
         break;
       }
       case ast.FROM: {
-        /*
-         * TODO(andrewhead): Discover definitions of symbols from wildcards, like {@code from <pkg> import *}.
-         */
         let modnames: string[] = [];
         if (statement.imports.constructor === Array) {
-          modnames = statement.imports.map(i => i.name || i.path);
-          symbolTable.moduleNames.add(...modnames);
           defs.add(
             ...statement.imports.map(i => {
               return {
@@ -224,6 +221,7 @@ export class DataflowAnalyzer {
               };
             })
           );
+          symbolTable.importModuleDefinitions(statement.base, statement.imports);
         }
         break;
       }
@@ -312,7 +310,7 @@ export class DataflowAnalyzer {
         );
         let undefinedRefs = this.analyze(
           defCfg,
-          this._sliceConfiguration,
+          this._moduleMap,
           argNames
         ).undefinedRefs;
         uses = undefinedRefs.filter(r => r.level == ReferenceType.USE);
@@ -342,7 +340,7 @@ export class DataflowAnalyzer {
     return uses;
   }
 
-  private _sliceConfiguration: SliceConfiguration;
+  private _moduleMap: ModuleMap;
   private _defUsesCache: { [statementLocation: string]: IDefUseInfo } = {};
 }
 
@@ -383,7 +381,7 @@ export class RefSet extends Set<Ref> {
 function locString(loc: ast.Location): string {
   return `${loc.first_line}:${loc.first_column}-${loc.last_line}:${
     loc.last_column
-  }`;
+    }`;
 }
 
 export function sameLocation(loc1: ast.Location, loc2: ast.Location): boolean {
@@ -424,9 +422,63 @@ interface IDefUseInfo {
   uses: RefSet;
 }
 
-interface SymbolTable {
-  // ⚠️ We should be doing full-blown symbol resolution, but meh 🙄
-  moduleNames: StringSet;
+export class SymbolTable {
+  public modules: ModuleMap = {};
+  public types: { [name: string]: TypeDescription } = {};
+  public functions: { [name: string]: FunctionDescription } = {};
+  public objects: { [name: string]: TypeDescription } = {};
+
+  constructor(private moduleMap: ModuleMap) {
+    // preload all the built-in functions.
+    this.importModuleDefinitions('__builtin__', [{ path: '*', name: '' }]);
+  }
+
+  public importModule(namePath: string): ModuleDescription {
+    const spec = this.lookupSpec(this.moduleMap, namePath.split('.'));
+    if (!spec) {
+      console.log(`*** WARNING no spec for module ${namePath}`);
+      return;
+    }
+    if (namePath) {
+      this.modules[namePath] = spec;
+    }
+  }
+
+  public importModuleDefinitions(namePath: string, imports: { path: string; name: string }[]): ModuleDescription {
+    const spec = this.lookupSpec(this.moduleMap, namePath.split('.'));
+    if (!spec) {
+      console.log(`*** WARNING no spec for module ${namePath}`);
+      return;
+    }
+    if (spec) {
+      imports.forEach(imp => {
+        if (imp.path === '*') {
+          if (spec.noSideEffects) { spec.noSideEffects.forEach(fname => this.functions[fname] = {}); }
+          if (spec.sideEffects) { Object.keys(spec.sideEffects).forEach(fname => this.functions[fname] = spec.sideEffects[fname]); }
+          if (spec.types) { Object.keys(spec.types).forEach(fname => this.types[fname] = spec.types[fname]); }
+        } else if (spec.noSideEffects && spec.noSideEffects.indexOf(imp.name)) {
+          this.functions[imp.name] = {};
+        } else if (spec.sideEffects && spec.sideEffects[imp.name]) {
+          this.functions[imp.name] = spec.sideEffects[imp.name];
+        } else if (spec.types && spec.types[imp.name]) {
+          this.types[imp.name] = spec.types[imp.name];
+        }
+      });
+    } else {
+      console.log(`*** WARNING no spec for module ${namePath}`);
+    }
+  }
+
+  private lookupSpec(map: ModuleMap, parts: string[]): ModuleDescription {
+    if (!map || parts.length == 0) { return undefined; }
+    const spec = map[parts[0]];
+    if (!spec) { return undefined; }
+    if (parts.length > 1) {
+      return this.lookupSpec(spec.modules, parts.slice(1));
+    } else {
+      return spec;
+    }
+  }
 }
 
 /**
@@ -464,7 +516,7 @@ class DefAnnotationListener implements ast.WalkListener {
                 statement: this._statement,
               });
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       }
     }
@@ -478,99 +530,77 @@ class DefAnnotationListener implements ast.WalkListener {
  * Tree walk listener for collecting names used in function call.
  */
 class CallNamesListener implements ast.WalkListener {
+
   constructor(
-    sliceConfiguration: SliceConfiguration,
-    statement: ast.SyntaxNode
+    private symbolTable: SymbolTable,
+    private statement: ast.SyntaxNode
   ) {
-    this._sliceConfiguration = sliceConfiguration;
-    this._statement = statement;
   }
 
   onEnterNode(node: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]) {
-    if (type == ast.CALL) {
-      let callNode = node as ast.Call;
-      let functionNameNode: ast.SyntaxNode;
-      let functionName: string;
-      if (callNode.func.type == ast.DOT) {
-        functionNameNode = callNode.func.name;
-        functionName = functionNameNode.toString();
-      } else {
-        functionNameNode = callNode.func as ast.Name;
-        functionName = functionNameNode.id;
-      }
+    if (node.type !== ast.CALL) { return; }
 
-      let skipRules = this._sliceConfiguration
-        .filter(config => config.functionName == functionName)
-        .filter(config => {
-          if (!config.objectName) return true;
-          if (
-            callNode.func.type == ast.DOT &&
-            callNode.func.value.type == ast.NAME
-          ) {
-            let instanceName = (callNode.func.value as ast.Name).id;
-            return config.objectName == instanceName;
-          }
-          return false;
-        });
-
-      if (callNode.func.type == ast.DOT) {
-        let skipObject = false;
-        for (let skipRule of skipRules) {
-          if (skipRule.doesNotModify.indexOf('OBJECT') !== -1) {
-            skipObject = true;
-            break;
-          }
-        }
-        if (!skipObject && callNode.func.value !== undefined) {
-          this._subtreesToProcess.push(callNode.func.value);
-        }
+    let spec: FunctionDescription;
+    const calledFunction = node.func;
+    if (calledFunction.type === ast.DOT && calledFunction.value.type === ast.NAME && calledFunction.name.type === ast.NAME) {
+      const typeSpec = this.symbolTable.objects[calledFunction.value.id];
+      if (typeSpec) {
+        spec = typeSpec.sideEffects[calledFunction.name.id];
       }
-
-      for (let i = 0; i < callNode.args.length; i++) {
-        let arg = callNode.args[i];
-        let skipArg = false;
-        for (let skipRule of skipRules) {
-          for (let skipSpec of skipRule.doesNotModify) {
-            if (typeof skipSpec === 'number' && skipSpec === i) {
-              skipArg = true;
-              break;
-            } else if (typeof skipSpec === 'string') {
-              if (
-                skipSpec === 'ARGUMENTS' ||
-                (arg.keyword && (arg.keyword as ast.Name).id === skipSpec)
-              ) {
-                skipArg = true;
-                break;
-              }
-            }
-          }
-          if (skipArg) break;
-        }
-        if (!skipArg) {
-          this._subtreesToProcess.push(arg.actual);
-        }
-      }
+    } else if (calledFunction.type === ast.NAME) {
+      spec = this.symbolTable.functions[calledFunction.id];
     }
 
-    if (type == ast.NAME) {
-      for (let ancestor of ancestors) {
-        if (this._subtreesToProcess.indexOf(ancestor) !== -1) {
+    if (spec) {
+      Object.keys(spec).forEach(paramName => {
+        const position = parseInt(paramName);
+        if (position === NaN) { return; }
+        let name: string;
+        if (0 < position && position - 1 < node.args.length) {
+          const arg = node.args[position - 1].actual;
+          if (arg.type === ast.NAME) { name = arg.id; }
+        } else if (position === 0 && node.func.type === ast.DOT && node.func.value.type === ast.NAME) {
+          name = node.func.value.id;
+        }
+        if (name) {
           this.defs.add({
             type: SymbolType.MUTATION,
             level: ReferenceType.UPDATE,
-            name: (node as ast.Name).id,
+            name: name,
             location: node.location,
-            statement: this._statement,
+            statement: this.statement,
           });
-          break;
         }
-      }
+      });
+    } else {
+      // Be conservative. If we don't know what the call does, 
+      // assume that it updates its arguments.
+      node.args.forEach(arg => {
+        if (arg.actual.type === ast.NAME) {
+          const name = arg.actual.id;
+          this.defs.add({
+            type: SymbolType.MUTATION,
+            level: ReferenceType.UPDATE,
+            name: name,
+            location: node.location,
+            statement: this.statement,
+          });
+        }
+      });
+      if (node.func.type === ast.DOT && node.func.value.type === ast.NAME) {
+        const name = node.func.value.id;
+        this.defs.add({
+          type: SymbolType.MUTATION,
+          level: ReferenceType.UPDATE,
+          name: name,
+          location: node.location,
+          statement: this.statement,
+        });
     }
+    }
+
   }
 
-  private _sliceConfiguration: SliceConfiguration;
-  private _statement: ast.SyntaxNode;
-  private _subtreesToProcess: ast.SyntaxNode[] = [];
   readonly defs: RefSet = new RefSet();
 }
 
