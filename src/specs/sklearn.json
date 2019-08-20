@@ -1,28 +1,20 @@
 {
-	"sklearn": {
-		"modules": {
-			"cluster": {
-				"types": {
-					"KMeans": {
-						"noSideEffects": [
-							"predict",
-							"score",
-							"transform"
-						],
-						"sideEffects": {
-							"fit": {
-								"0": "update"
-							},
-							"fit_predict": {
-								"0": "update"
-							},
-							"fit_transform": {
-								"0": "update"
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+  "sklearn": {
+    "modules": {
+      "cluster": {
+        "types": {
+          "KMeans": {
+            "methods": [
+              { "name": "fit", "updates": [0] },
+              { "name": "fit_predict", "updates": [0] },
+              { "name": "fit_transform", "updates": [0] },
+              "predict",
+              "score",
+              "transform"
+            ]
+          }
+        }
+      }
+    }
+  }
 }

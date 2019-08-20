@@ -1,18 +1,11 @@
 import { expect } from 'chai';
 import { SyntaxNode, parse } from '../python-parser';
 import { ControlFlowGraph } from '../control-flow';
-import {
-  DataflowAnalyzer,
-  Dataflow,
-  Ref,
-  ReferenceType,
-  RefSet,
-  SymbolType,
-  SymbolTable,
-} from '../data-flow';
-import { Set, StringSet } from '../set';
-import { ModuleMap, GlobalModuleMap } from '../specs';
+import { DataflowAnalyzer, Dataflow, Ref, ReferenceType, RefSet, SymbolType } from '../data-flow';
+import { Set } from '../set';
+import { JsonSpecs, GlobalModuleMap } from '../specs';
 import { printNode } from '../printNode';
+import { SymbolTable } from '../symbol-table';
 
 describe('detects dataflow dependencies', () => {
   function analyze(...codeLines: string[]): Set<Dataflow> {
@@ -147,32 +140,33 @@ describe('detects control dependencies', () => {
 });
 
 describe('getDefs', () => {
-  function getDefsFromStatements(...codeLines: string[]): Ref[] {
+
+  function getDefsFromStatements(mmap?: JsonSpecs, ...codeLines: string[]): Ref[] {
     let code = codeLines.concat('').join('\n');
     let module = parse(code);
     let analyzer = new DataflowAnalyzer();
-    return new RefSet().union(
-      ...module.code.map((stmt: SyntaxNode) => {
-        return analyzer.getDefs(stmt, new SymbolTable(GlobalModuleMap));
-      })
-    ).items;
+    const symtab = new SymbolTable(mmap || GlobalModuleMap);
+    return module.code.reduce((refSet, stmt) => {
+      const refs = analyzer.getDefs(stmt, symtab, refSet);
+      return refSet.union(refs);
+    }, new RefSet()).items;
   }
 
   function getDefsFromStatement(
     code: string,
-    mmap?: ModuleMap
+    mmap?: JsonSpecs
   ): Ref[] {
     mmap = mmap || GlobalModuleMap;
     code = code + '\n'; // programs need to end with newline
     let mod = parse(code);
     let analyzer = new DataflowAnalyzer(mmap);
-    return analyzer.getDefs(mod.code[0], new SymbolTable(mmap))
+    return analyzer.getDefs(mod.code[0], new SymbolTable(mmap), new RefSet())
       .items;
   }
 
   function getDefNamesFromStatement(
     code: string,
-    mmap?: ModuleMap
+    mmap?: JsonSpecs
   ) {
     return getDefsFromStatement(code, mmap).map(def => def.name);
   }
@@ -274,11 +268,9 @@ describe('getDefs', () => {
       });
 
       it('computing the def location relative to the line it appears on', () => {
-        let defs = getDefsFromStatements(
-          [
-            '# this is an empty line',
-            '"""defs: [{ "name": "a", "pos": [[0, 0], [0, 11]] }]"""%some_magic',
-          ].join('\n')
+        let defs = getDefsFromStatements(undefined,
+          '# this is an empty line',
+          '"""defs: [{ "name": "a", "pos": [[0, 0], [0, 11]] }]"""%some_magic',
         );
         expect(defs[0]).to.deep.include({
           location: {
@@ -303,16 +295,16 @@ describe('getDefs', () => {
       });
     });
 
-    describe('; given a slice config', () => {
+    describe('; given a spec,', () => {
       it('can ignore all arguments', () => {
         let defs = getDefsFromStatement('func(a, b, c)',
-          { __builtin__: { noSideEffects: ['func'] } });
+          { __builtins__: { functions: ['func'] } });
         expect(defs).to.deep.equal([]);
       });
 
       it('assumes arguments have side-effects, without a spec', () => {
         let defs = getDefsFromStatement('func(a, b, c)',
-          { __builtin__: { noSideEffects: [] } });
+          { __builtins__: { functions: [] } });
         expect(defs).to.exist;
         expect(defs.length).to.equal(3);
         const names = defs.map(d => d.name);
@@ -321,18 +313,22 @@ describe('getDefs', () => {
         expect(names).to.include('c');
       });
 
-      xit('can ignore the object functions are called on', () => {
-        let defs = getDefsFromStatement(['x=C()', 'x.m()', ''].join('\n'),
-          { __builtin__: { types: { C: { noSideEffects: ['m'] } } } });
-        expect(defs).to.deep.equal([]);
-      });
-
-      it('assumes method call affects self, without a spec', () => {
-        let defs = getDefsFromStatement(['x=C()', 'x.m()', ''].join('\n'),
-          { __builtin__: {} });
+      it('can ignore the method receiver', () => {
+        const mmap = { __builtins__: { types: { C: { methods: ['m'] } } } };
+        let defs = getDefsFromStatements(mmap, 'x=C()', 'x.m()');
         expect(defs).to.exist;
         expect(defs.length).to.equal(1);
         expect(defs[0].name).to.equal('x');
+        expect(defs[0].level).to.equal(ReferenceType.DEFINITION);
+      });
+
+      it('assumes method call affects the receiver, without a spec', () => {
+        const mmap = { __builtins__: {} };
+        let defs = getDefsFromStatements(mmap, 'x=C()', 'x.m()');
+        expect(defs).to.exist;
+        expect(defs.length).to.equal(2);
+        expect(defs[1].name).to.equal('x');
+        expect(defs[1].level).to.equal(ReferenceType.UPDATE);
       });
 
     });

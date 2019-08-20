@@ -83,6 +83,11 @@ export interface Location extends JisonLocation {
   path?: string; // useful for error messages and other tracking
 }
 
+export function locationString(loc: Location) {
+  return `${loc.last_line}:${loc.first_column}-${loc.last_line}:${loc.last_column}`;
+}
+
+
 // loc2 is inside loc1
 export function locationContains(loc1: Location, loc2: Location) {
   function contains(loc: Location, line: number, col: number) {
@@ -338,7 +343,7 @@ export const DOT = 'dot';
 export interface Dot extends Locatable {
   type: typeof DOT;
   value: SyntaxNode;
-  name: SyntaxNode;
+  name: string;
 }
 
 export const IFEXPR = 'ifexpr';
@@ -583,7 +588,7 @@ function walkRecursive(
       children = [node.cond].concat(node.err ? [node.err] : []);
       break;
     case DOT:
-      children = [node.value, node.name];
+      children = [node.value];
       break;
     case INDEX:
       children = [node.value].concat(node.args);

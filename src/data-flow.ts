@@ -1,7 +1,9 @@
 import * as ast from './python-parser';
 import { Block, ControlFlowGraph } from './control-flow';
 import { Set, StringSet } from './set';
-import { GlobalModuleMap, ModuleMap, FunctionDescription, TypeDescription, ModuleDescription } from './specs';
+import { GlobalModuleMap, JsonSpecs, FunctionSpec, TypeSpec, ModuleSpec, FunctionDescription } from './specs';
+import { SymbolTable } from './symbol-table';
+import { symbol } from 'prop-types';
 
 /**
  * Use a shared dataflow analyzer object for all dataflow analysis / querying for defs and uses.
@@ -9,46 +11,31 @@ import { GlobalModuleMap, ModuleMap, FunctionDescription, TypeDescription, Modul
  * For caching to work, statements must be annotated with a cell's ID and execution count.
  */
 export class DataflowAnalyzer {
-  constructor(moduleMap?: ModuleMap) {
-    this._moduleMap = moduleMap || GlobalModuleMap;
-  }
-
-  private statementLocationKey(statement: ast.SyntaxNode) {
-    return (
-      statement.location.first_line +
-      ',' +
-      statement.location.first_column +
-      ',' +
-      statement.location.last_line +
-      ',' +
-      statement.location.last_column
-    );
+  constructor(moduleMap?: JsonSpecs) {
+    this._specs = moduleMap || GlobalModuleMap;
   }
 
   getDefsUses(
     statement: ast.SyntaxNode,
     symbolTable?: SymbolTable
   ): IDefUseInfo {
-    symbolTable = symbolTable || new SymbolTable(this._moduleMap);
-    let cacheKey = this.statementLocationKey(statement);
-    if (cacheKey != null) {
-      if (this._defUsesCache.hasOwnProperty(cacheKey)) {
-        return this._defUsesCache[cacheKey];
-      }
-    }
-    let defSet = this.getDefs(statement, symbolTable);
+    symbolTable = symbolTable || new SymbolTable(this._specs);
+
+    let cacheKey = ast.locationString(statement.location);
+    const cached = this._defUsesCache[cacheKey];
+    if (cached) { return cached; }
+
+    let defSet = this.getDefs(statement, symbolTable, new RefSet());
     let useSet = this.getUses(statement, symbolTable);
     let result = { defs: defSet, uses: useSet };
-    if (cacheKey != null) {
-      this._defUsesCache[cacheKey] = result;
-    }
+    this._defUsesCache[cacheKey] = result;
     return result;
   }
 
   // tslint:disable-next-line: max-func-body-length
   analyze(
     cfg: ControlFlowGraph,
-    moduleMap?: ModuleMap,
+    moduleMap?: JsonSpecs,
     namesDefined?: StringSet
   ): DataflowAnalysisResult {
     moduleMap = moduleMap || GlobalModuleMap;
@@ -132,8 +119,7 @@ export class DataflowAnalyzer {
           defsForLevel[level] = updateDefsForLevel(
             defsForLevel[level],
             level,
-            statementRefs,
-            DEPENDENCY_RULES
+            statementRefs
           );
         }
       }
@@ -167,172 +153,110 @@ export class DataflowAnalyzer {
     };
   }
 
-  // tslint:disable-next-line: max-func-body-length
-  getDefs(statement: ast.SyntaxNode, symbolTable: SymbolTable): RefSet {
-    let defs = new RefSet();
-    if (!statement) return defs;
+  getDefs(statement: ast.SyntaxNode, symbolTable: SymbolTable, previousDefs: RefSet): RefSet {
+    if (!statement) return previousDefs;
 
-    /*
-     * Assume by default that all names passed in as arguments to a function
-     * an all objects that a function is called on are modified by that function call,
-     * unless otherwise specified in the slice configuration.
-     */
-    let callNamesListener = new CallNamesListener(
-      symbolTable,
-      statement
-    );
-    ast.walk(statement, callNamesListener);
-    defs.add(...callNamesListener.defs.items);
-
-    let defAnnotationsListener = new DefAnnotationListener(statement);
-    ast.walk(statement, defAnnotationsListener);
-    defs = defs.union(defAnnotationsListener.defs);
-
+    runAnalysis(ApiCallAnalysis, previousDefs, statement, symbolTable);
+    runAnalysis(DefAnnotationAnalysis, previousDefs, statement, symbolTable);
 
     switch (statement.type) {
       case ast.IMPORT: {
-        statement.names.forEach(imp => {
-          const spec = symbolTable.importModule(imp.path);
-        });
-        defs.add(
-          ...statement.names.map(nameNode => {
-            return {
-              type: SymbolType.IMPORT,
-              level: ReferenceType.DEFINITION,
-              name: nameNode.name || nameNode.path,
-              location: nameNode.location,
-              statement: statement,
-            };
-          })
-        );
+        this.getImportDefs(statement, previousDefs, symbolTable);
         break;
       }
       case ast.FROM: {
-        let modnames: string[] = [];
-        if (statement.imports.constructor === Array) {
-          defs.add(
-            ...statement.imports.map(i => {
-              return {
-                type: SymbolType.IMPORT,
-                level: ReferenceType.DEFINITION,
-                name: i.name || i.path,
-                location: i.location,
-                statement: statement,
-              };
-            })
-          );
-          symbolTable.importModuleDefinitions(statement.base, statement.imports);
-        }
+        this.getImportFromDefs(statement, previousDefs, symbolTable);
         break;
       }
       case ast.ASSIGN: {
-        let targetsDefListener = new TargetsDefListener(statement);
-        if (statement.targets) {
-          for (let target of statement.targets) {
-            ast.walk(target, targetsDefListener);
-          }
-        }
-        /*
-         * If `statement.op` is defined, then it is an augassign (e.g., +=). Any variables defined
-         * on the left-hand side are actually getting updated.
-         */
-        if (statement.op) {
-          for (let targetDef of targetsDefListener.defs.items) {
-            if (targetDef.level === ReferenceType.DEFINITION) {
-              targetDef.level = ReferenceType.UPDATE;
-            }
-          }
-        }
-        defs = defs.union(targetsDefListener.defs);
+        previousDefs = this.getAssignDefs(statement, previousDefs, symbolTable);
         break;
       }
       case ast.DEF: {
-        defs.add({
-          type: SymbolType.FUNCTION,
-          level: ReferenceType.DEFINITION,
-          name: statement.name,
-          location: statement.location,
-          statement: statement,
-        });
+        this.getFuncDefs(statement, previousDefs, symbolTable);
         break;
       }
       case ast.CLASS: {
-        defs.add({
-          type: SymbolType.CLASS,
-          level: ReferenceType.DEFINITION,
-          name: statement.name,
-          location: statement.location,
-          statement: statement,
-        });
+        this.getClassDefs(statement, previousDefs, symbolTable);
+        break;
       }
     }
+    return previousDefs;
+  }
+
+  private getClassDefs(classDecl: ast.Class, defs: RefSet, symbolTable: SymbolTable) {
+    defs.add({
+      type: SymbolType.CLASS,
+      level: ReferenceType.DEFINITION,
+      name: classDecl.name,
+      location: classDecl.location,
+      statement: classDecl,
+    });
+  }
+
+  private getFuncDefs(funcDecl: ast.Def, defs: RefSet, symbolTable: SymbolTable) {
+    defs.add({
+      type: SymbolType.FUNCTION,
+      level: ReferenceType.DEFINITION,
+      name: funcDecl.name,
+      location: funcDecl.location,
+      statement: funcDecl,
+    });
+  }
+
+  private getAssignDefs(assign: ast.Assignment, defs: RefSet, symbolTable: SymbolTable) {
+    let targetsDefListener = new TargetsDefListener(assign, symbolTable);
+    defs = defs.union(targetsDefListener.defs);
     return defs;
   }
 
-  getUses(statement: ast.SyntaxNode, _: SymbolTable): RefSet {
-    let uses = new RefSet();
+  private getImportFromDefs(from: ast.From, defs: RefSet, symbolTable: SymbolTable) {
+    let modnames: string[] = [];
+    if (from.imports.constructor === Array) {
+      defs.add(...from.imports.map(i => {
+        return {
+          type: SymbolType.IMPORT,
+          level: ReferenceType.DEFINITION,
+          name: i.name || i.path,
+          location: i.location,
+          statement: from,
+        };
+      }));
+      symbolTable.importModuleDefinitions(from.base, from.imports);
+    }
+  }
 
+  private getImportDefs(imprt: ast.Import, defs: RefSet, symbolTable: SymbolTable) {
+    imprt.names.forEach(imp => {
+      const spec = symbolTable.importModule(imp.path);
+    });
+    defs.add(...imprt.names.map(nameNode => {
+      return {
+        type: SymbolType.IMPORT,
+        level: ReferenceType.DEFINITION,
+        name: nameNode.name || nameNode.path,
+        location: nameNode.location,
+        statement: imprt,
+      };
+    }));
+  }
+
+  getUses(statement: ast.SyntaxNode, symbolTable: SymbolTable): RefSet {
+    let uses = new RefSet();
     switch (statement.type) {
       // TODO: should we collect when importing with FROM from something else that was already imported...
       case ast.ASSIGN: {
-        // XXX: Is this supposed to union with funcArgs?
-        const targetNames = gatherNames(statement.targets);
-        const targets = new RefSet(
-          ...targetNames.items.map(([name, node]) => {
-            return {
-              type: SymbolType.VARIABLE,
-              level: ReferenceType.USE,
-              name: name,
-              location: node.location,
-              statement: statement,
-            };
-          })
-        );
-        const sourceNames = gatherNames(statement.sources);
-        const sources = new RefSet(
-          ...sourceNames.items.map(([name, node]) => {
-            return {
-              type: SymbolType.VARIABLE,
-              level: ReferenceType.USE,
-              name: name,
-              location: node.location,
-              statement: statement,
-            };
-          })
-        );
-        uses = uses.union(sources).union(statement.op ? targets : new RefSet());
+        uses = this.getAssignUses(statement, uses);
         break;
       }
       case ast.DEF:
-        let defCfg = new ControlFlowGraph(statement);
-        let argNames = new StringSet(
-          ...statement.params.map(p => p.name).filter(n => n != undefined)
-        );
-        let undefinedRefs = this.analyze(
-          defCfg,
-          this._moduleMap,
-          argNames
-        ).undefinedRefs;
-        uses = undefinedRefs.filter(r => r.level == ReferenceType.USE);
+        uses = this.getFuncDeclUses(statement, uses);
         break;
       case ast.CLASS:
-        statement.code.forEach(classStatement =>
-          uses.add(...this.getUses(classStatement, _).items)
-        );
+        this.getClassDeclUses(statement, uses, symbolTable);
         break;
       default: {
-        const usedNames = gatherNames(statement);
-        uses = new RefSet(
-          ...usedNames.items.map(([name, node]) => {
-            return {
-              type: SymbolType.VARIABLE,
-              level: ReferenceType.USE,
-              name: name,
-              location: node.location,
-              statement: statement,
-            };
-          })
-        );
+        uses = this.getNameUses(statement, uses);
         break;
       }
     }
@@ -340,20 +264,75 @@ export class DataflowAnalyzer {
     return uses;
   }
 
-  private _moduleMap: ModuleMap;
+  private getNameUses(statement: ast.SyntaxNode, uses: RefSet) {
+    const usedNames = gatherNames(statement);
+    uses = new RefSet(...usedNames.items.map(([name, node]) => {
+      return {
+        type: SymbolType.VARIABLE,
+        level: ReferenceType.USE,
+        name: name,
+        location: node.location,
+        statement: statement,
+      };
+    }));
+    return uses;
+  }
+
+  private getClassDeclUses(statement: ast.Class, uses: RefSet, symbolTable: SymbolTable) {
+    statement.code.forEach(classStatement => uses.add(...this.getUses(classStatement, symbolTable).items));
+  }
+
+  private getFuncDeclUses(statement: ast.Def, uses: RefSet) {
+    let defCfg = new ControlFlowGraph(statement);
+    let argNames = new StringSet(...statement.params.map(p => p.name).filter(n => n != undefined));
+    let undefinedRefs = this.analyze(defCfg, this._specs, argNames).undefinedRefs;
+    uses = undefinedRefs.filter(r => r.level == ReferenceType.USE);
+    return uses;
+  }
+
+  private getAssignUses(statement: ast.Assignment, uses: RefSet) {
+    // XXX: Is this supposed to union with funcArgs?
+    const targetNames = gatherNames(statement.targets);
+    const targets = new RefSet(...targetNames.items.map(([name, node]) => {
+      return {
+        type: SymbolType.VARIABLE,
+        level: ReferenceType.USE,
+        name: name,
+        location: node.location,
+        statement: statement,
+      };
+    }));
+    const sourceNames = gatherNames(statement.sources);
+    const sources = new RefSet(...sourceNames.items.map(([name, node]) => {
+      return {
+        type: SymbolType.VARIABLE,
+        level: ReferenceType.USE,
+        name: name,
+        location: node.location,
+        statement: statement,
+      };
+    }));
+    uses = uses.union(sources).union(statement.op ? targets : new RefSet());
+    return uses;
+  }
+
+  private _specs: JsonSpecs;
   private _defUsesCache: { [statementLocation: string]: IDefUseInfo } = {};
 }
+
 
 export interface Dataflow {
   fromNode: ast.SyntaxNode;
   toNode: ast.SyntaxNode;
 }
 
+
 export enum ReferenceType {
   DEFINITION = 'DEFINITION',
   UPDATE = 'UPDATE',
   USE = 'USE',
 }
+
 
 export enum SymbolType {
   VARIABLE,
@@ -364,25 +343,23 @@ export enum SymbolType {
   MAGIC,
 }
 
+
 export interface Ref {
   type: SymbolType;
   level: ReferenceType;
   name: string;
+  inferredType?: string;
   location: ast.Location;
   statement: ast.SyntaxNode;
 }
 
+
 export class RefSet extends Set<Ref> {
   constructor(...items: Ref[]) {
-    super(r => r.name + r.level + locString(r.location), ...items);
+    super(r => r.name + r.level + ast.locationString(r.location), ...items);
   }
 }
 
-function locString(loc: ast.Location): string {
-  return `${loc.first_line}:${loc.first_column}-${loc.last_line}:${
-    loc.last_column
-    }`;
-}
 
 export function sameLocation(loc1: ast.Location, loc2: ast.Location): boolean {
   return (
@@ -395,7 +372,7 @@ export function sameLocation(loc1: ast.Location, loc2: ast.Location): boolean {
 
 function getNameSetId([name, node]: [string, ast.SyntaxNode]) {
   if (!node.location) console.log('***', node);
-  return `${name}@${locString(node.location)}`;
+  return `${name}@${ast.locationString(node.location)}`;
 }
 
 class NameSet extends Set<[string, ast.SyntaxNode]> {
@@ -417,76 +394,39 @@ function gatherNames(node: ast.SyntaxNode | ast.SyntaxNode[]): NameSet {
   }
 }
 
+
+
+
 interface IDefUseInfo {
   defs: RefSet;
   uses: RefSet;
 }
 
-export class SymbolTable {
-  public modules: ModuleMap = {};
-  public types: { [name: string]: TypeDescription } = {};
-  public functions: { [name: string]: FunctionDescription } = {};
-  public objects: { [name: string]: TypeDescription } = {};
 
-  constructor(private moduleMap: ModuleMap) {
-    // preload all the built-in functions.
-    this.importModuleDefinitions('__builtin__', [{ path: '*', name: '' }]);
-  }
+abstract class AnalysisWalker implements ast.WalkListener {
+  readonly defs: RefSet = new RefSet();
+  constructor(protected _statement: ast.SyntaxNode, protected symbolTable: SymbolTable) { }
 
-  public importModule(namePath: string): ModuleDescription {
-    const spec = this.lookupSpec(this.moduleMap, namePath.split('.'));
-    if (!spec) {
-      console.log(`*** WARNING no spec for module ${namePath}`);
-      return;
-    }
-    if (namePath) {
-      this.modules[namePath] = spec;
-    }
-  }
+  onEnterNode?(node: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]) {
 
-  public importModuleDefinitions(namePath: string, imports: { path: string; name: string }[]): ModuleDescription {
-    const spec = this.lookupSpec(this.moduleMap, namePath.split('.'));
-    if (!spec) {
-      console.log(`*** WARNING no spec for module ${namePath}`);
-      return;
-    }
-    if (spec) {
-      imports.forEach(imp => {
-        if (imp.path === '*') {
-          if (spec.noSideEffects) { spec.noSideEffects.forEach(fname => this.functions[fname] = {}); }
-          if (spec.sideEffects) { Object.keys(spec.sideEffects).forEach(fname => this.functions[fname] = spec.sideEffects[fname]); }
-          if (spec.types) { Object.keys(spec.types).forEach(fname => this.types[fname] = spec.types[fname]); }
-        } else if (spec.noSideEffects && spec.noSideEffects.indexOf(imp.name)) {
-          this.functions[imp.name] = {};
-        } else if (spec.sideEffects && spec.sideEffects[imp.name]) {
-          this.functions[imp.name] = spec.sideEffects[imp.name];
-        } else if (spec.types && spec.types[imp.name]) {
-          this.types[imp.name] = spec.types[imp.name];
-        }
-      });
-    } else {
-      console.log(`*** WARNING no spec for module ${namePath}`);
-    }
-  }
-
-  private lookupSpec(map: ModuleMap, parts: string[]): ModuleDescription {
-    if (!map || parts.length == 0) { return undefined; }
-    const spec = map[parts[0]];
-    if (!spec) { return undefined; }
-    if (parts.length > 1) {
-      return this.lookupSpec(spec.modules, parts.slice(1));
-    } else {
-      return spec;
-    }
   }
 }
+
+function runAnalysis<T extends AnalysisWalker>(
+  Analysis: new (statement: ast.SyntaxNode, symbolTable: SymbolTable, refSet: RefSet) => T,
+  refSet: RefSet, statement: ast.SyntaxNode, symbolTable: SymbolTable) {
+  const walker = new Analysis(statement, symbolTable, refSet);
+  ast.walk(statement, walker);
+  refSet.add(...walker.defs.items);
+}
+
 
 /**
  * Tree walk listener for collecting manual def annotations.
  */
-class DefAnnotationListener implements ast.WalkListener {
-  constructor(statement: ast.SyntaxNode) {
-    this._statement = statement;
+class DefAnnotationAnalysis extends AnalysisWalker {
+  constructor(statement: ast.SyntaxNode, symbolTable: SymbolTable) {
+    super(statement, symbolTable);
   }
 
   onEnterNode(node: ast.SyntaxNode, type: string) {
@@ -521,40 +461,45 @@ class DefAnnotationListener implements ast.WalkListener {
       }
     }
   }
-
-  private _statement: ast.SyntaxNode;
-  readonly defs: RefSet = new RefSet();
 }
+
+
+
 
 /**
  * Tree walk listener for collecting names used in function call.
  */
-class CallNamesListener implements ast.WalkListener {
+class ApiCallAnalysis extends AnalysisWalker {
 
-  constructor(
-    private symbolTable: SymbolTable,
-    private statement: ast.SyntaxNode
-  ) {
+  constructor(statement: ast.SyntaxNode, symbolTable: SymbolTable, private refSet: RefSet) {
+    super(statement, symbolTable);
   }
 
   onEnterNode(node: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]) {
     if (node.type !== ast.CALL) { return; }
 
-    let spec: FunctionDescription;
-    const calledFunction = node.func;
-    if (calledFunction.type === ast.DOT && calledFunction.value.type === ast.NAME && calledFunction.name.type === ast.NAME) {
-      const typeSpec = this.symbolTable.objects[calledFunction.value.id];
-      if (typeSpec) {
-        spec = typeSpec.sideEffects[calledFunction.name.id];
+    let spec: FunctionSpec;
+    const func = node.func;
+    if (func.type === ast.DOT && func.value.type === ast.NAME) {
+      // It's a method call.
+      const receiver = func.value;
+      const ref = this.refSet.items.find(r => r.name === receiver.id);
+      if (ref) {
+        const receiverType = ref.inferredType;
+        if (receiverType) {
+          const funcName: string = func.name;
+          spec = this.symbolTable.types[receiverType].methods.find(m => m.name === funcName);
+        }
       }
-    } else if (calledFunction.type === ast.NAME) {
-      spec = this.symbolTable.functions[calledFunction.id];
+    } else if (func.type === ast.NAME) {
+      // It's a function call.
+      spec = this.symbolTable.functions[func.id];
     }
 
     if (spec) {
       Object.keys(spec).forEach(paramName => {
         const position = parseInt(paramName);
-        if (position === NaN) { return; }
+        if (position === NaN) { return; } // TODO: think about mutation of global variables
         let name: string;
         if (0 < position && position - 1 < node.args.length) {
           const arg = node.args[position - 1].actual;
@@ -568,13 +513,13 @@ class CallNamesListener implements ast.WalkListener {
             level: ReferenceType.UPDATE,
             name: name,
             location: node.location,
-            statement: this.statement,
+            statement: this._statement,
           });
         }
       });
     } else {
       // Be conservative. If we don't know what the call does, 
-      // assume that it updates its arguments.
+      // assume that it mutates its arguments.
       node.args.forEach(arg => {
         if (arg.actual.type === ast.NAME) {
           const name = arg.actual.id;
@@ -583,7 +528,7 @@ class CallNamesListener implements ast.WalkListener {
             level: ReferenceType.UPDATE,
             name: name,
             location: node.location,
-            statement: this.statement,
+            statement: this._statement,
           });
         }
       });
@@ -594,58 +539,73 @@ class CallNamesListener implements ast.WalkListener {
           level: ReferenceType.UPDATE,
           name: name,
           location: node.location,
-          statement: this.statement,
+          statement: this._statement,
         });
-    }
+      }
     }
 
   }
-
-  readonly defs: RefSet = new RefSet();
 }
+
+
 
 /**
  * Tree walk listener for collecting definitions in the target of an assignment.
  */
-class TargetsDefListener implements ast.WalkListener {
-  constructor(statement: ast.SyntaxNode) {
-    this._statement = statement;
+class TargetsDefListener extends AnalysisWalker {
+  private isAugAssign: boolean;
+
+  constructor(assign: ast.Assignment, symbolTable: SymbolTable) {
+    super(assign, symbolTable);
+    this.isAugAssign = !!assign.op;
+    if (assign.targets) {
+      for (let target of assign.targets) {
+        ast.walk(target, this);
+      }
+    }
+    assign.sources.forEach((source, i) => {
+      if (source.type === ast.CALL && source.func.type === ast.NAME) {
+        const spec = symbolTable.getFunction(source.func.id);
+        if (spec && assign.targets[i]) {
+          const target = assign.targets[i];
+          if (target.type === ast.NAME) {
+            const def = this.defs.items.find(d => d.name === target.id);
+            if (def) {
+              def.inferredType = spec.returns;
+            }
+          }
+        }
+      }
+    });
   }
 
-  onEnterNode(node: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]) {
+  onEnterNode(target: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]) {
     if (type == ast.NAME) {
-      let level = ReferenceType.DEFINITION;
-      if (ancestors.some(a => a.type == ast.DOT)) {
-        level = ReferenceType.UPDATE;
-      } else if (ancestors.some(a => a.type == ast.INDEX)) {
-        level = ReferenceType.UPDATE;
-      }
+      const isUpdate = this.isAugAssign || ancestors.some(a => a.type == ast.DOT || a.type == ast.INDEX);
       this.defs.add({
         type: SymbolType.VARIABLE,
-        level: level,
-        location: node.location,
-        name: (node as ast.Name).id,
+        level: isUpdate ? ReferenceType.UPDATE : ReferenceType.DEFINITION,
+        location: target.location,
+        name: (target as ast.Name).id,
         statement: this._statement,
       });
     }
   }
-
-  private _statement: ast.SyntaxNode;
-  readonly defs: RefSet = new RefSet();
 }
+
+
+
 
 function getDataflowId(df: Dataflow) {
   if (!df.fromNode.location)
     console.log('*** FROM', df.fromNode, df.fromNode.location);
   if (!df.toNode.location) console.log('*** TO', df.toNode, df.toNode.location);
-  return `${locString(df.fromNode.location)}->${locString(df.toNode.location)}`;
+  return `${ast.locationString(df.fromNode.location)}->${ast.locationString(df.toNode.location)}`;
 }
 
-function createFlowsFrom(
-  fromSet: RefSet,
-  toSet: RefSet,
-  fromStatement: ast.SyntaxNode
-): [Set<Dataflow>, Set<Ref>] {
+
+
+function createFlowsFrom(fromSet: RefSet, toSet: RefSet, fromStatement: ast.SyntaxNode): [Set<Dataflow>, Set<Ref>] {
   let refsDefined = new RefSet();
   let newFlows = new Set<Dataflow>(getDataflowId);
   for (let from of fromSet.items) {
@@ -658,6 +618,8 @@ function createFlowsFrom(
   }
   return [newFlows, refsDefined];
 }
+
+
 
 let DEPENDENCY_RULES = [
   // "from" depends on all reference types in "to"
@@ -690,14 +652,15 @@ let KILL_RULES = [
   },
 ];
 
+
+
 function updateDefsForLevel(
   defsForLevel: RefSet,
   level: string,
-  newRefs: { [level: string]: RefSet },
-  dependencyRules: { from: ReferenceType; to: ReferenceType[] }[]
+  newRefs: { [level: string]: RefSet }
 ) {
   let genSet = new RefSet();
-  let levelDependencies = dependencyRules.filter(r => r.from == level).pop();
+  let levelDependencies = DEPENDENCY_RULES.find(r => r.from == level);
   for (let level of Object.keys(ReferenceType)) {
     newRefs[level].items.forEach(ref => {
       if (levelDependencies && levelDependencies.to.indexOf(ref.level) != -1) {
@@ -709,7 +672,7 @@ function updateDefsForLevel(
     let found = false;
     genSet.items.forEach(gen => {
       if (gen.name == def.name) {
-        let killRules = KILL_RULES.filter(r => r.level == gen.level).pop();
+        let killRules = KILL_RULES.find(r => r.level == gen.level);
         if (killRules && killRules.kills.indexOf(def.level) != -1) {
           found = true;
         }
@@ -719,6 +682,7 @@ function updateDefsForLevel(
   });
   return defsForLevel.minus(killSet).union(genSet);
 }
+
 
 export type DataflowAnalysisResult = {
   flows: Set<Dataflow>;

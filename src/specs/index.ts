@@ -1,29 +1,37 @@
-import * as builtins from './__builtin__.json';
-import * as matplotlib from './matplotlib.json';
-import * as pandas from './pandas.json';
-import * as sklearn from './sklearn.json';
+import * as builtins from "./__builtins__.json";
+import * as matplotlib from "./matplotlib.json";
+import * as pandas from "./pandas.json";
+import * as sklearn from "./sklearn.json";
 
-export interface FunctionDescription {
-	[paramName: string]: string; // "read" | "update" | "higher-order";
+export interface FunctionSpec {
+  name: string;
+  updates?: (string | number)[];
+  reads?: string[];
+  returns?: string;
+  higherorder?: number;
 }
 
-export interface TypeDescription {
-	noSideEffects?: string[];
-	sideEffects?: { [name: string]: FunctionDescription };
+export type FunctionDescription = string | FunctionSpec;
+
+export interface TypeSpec<FD> {
+  methods?: FD[];
 }
 
-export interface ModuleDescription extends TypeDescription {
-	modules?: ModuleMap;
-	types?: { [typeName: string]: TypeDescription };
+export interface ModuleSpec<FD> extends TypeSpec<FD> {
+  functions?: FD[];
+  modules?: ModuleMap<FD>;
+  types?: { [typeName: string]: TypeSpec<FD> };
 }
 
-export interface ModuleMap {
-	[moduleName: string]: ModuleDescription;
+export interface ModuleMap<FD> {
+  [moduleName: string]: ModuleSpec<FD>;
 }
 
-export const GlobalModuleMap: ModuleMap = {
-	...builtins,
-	...matplotlib,
-	...pandas,
-	...sklearn
+export type JsonSpecs = ModuleMap<FunctionDescription>;
+
+export const GlobalModuleMap: JsonSpecs = {
+  ...builtins,
+  ...matplotlib,
+  ...pandas,
+  ...sklearn
 };

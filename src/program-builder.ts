@@ -1,6 +1,6 @@
 import { Cell } from './cell';
 import * as ast from './python-parser';
-import { DataflowAnalyzer, Ref } from './data-flow';
+import { DataflowAnalyzer, Ref, RefSet } from './data-flow';
 import { MagicsRewriter } from './rewrite-magics';
 import { NumberSet } from './set';
 
