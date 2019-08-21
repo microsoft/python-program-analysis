@@ -1,4 +1,5 @@
 import * as builtins from "./__builtins__.json";
+import * as random from "./random.json";
 import * as matplotlib from "./matplotlib.json";
 import * as pandas from "./pandas.json";
 import * as sklearn from "./sklearn.json";
@@ -31,6 +32,7 @@ export type JsonSpecs = ModuleMap<FunctionDescription>;
 
 export const GlobalModuleMap: JsonSpecs = {
   ...builtins,
+  ...random,
   ...matplotlib,
   ...pandas,
   ...sklearn

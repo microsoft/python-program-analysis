@@ -11,4 +11,10 @@ module.exports = {
   colors: true,
   autoWatch: true,
   concurrency: Infinity,
+  customLaunchers: {
+    ChromeDebugging: {
+      base: 'Chrome',
+      flags: [ '--remote-debugging-port=9333' ]
+    }
+  },
 };

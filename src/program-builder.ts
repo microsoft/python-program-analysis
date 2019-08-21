@@ -103,7 +103,7 @@ export class ProgramBuilder {
           defs = [];
           uses = [];
           for (let stmt of tree.code) {
-            let defsUses = this._dataflowAnalyzer.getDefsUses(stmt);
+            let defsUses = this._dataflowAnalyzer.getDefsUses(stmt, new RefSet());
             defs.push(...defsUses.defs.items);
             uses.push(...defsUses.uses.items);
           }

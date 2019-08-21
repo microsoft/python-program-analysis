@@ -166,7 +166,7 @@
           "max",
           "mean",
           "median",
-          "melt",
+          {"name": "melt", "updates": [0] },
           "memory_usage",
           "merge",
           "min",

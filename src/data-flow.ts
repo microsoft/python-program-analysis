@@ -3,7 +3,6 @@ import { Block, ControlFlowGraph } from './control-flow';
 import { Set, StringSet } from './set';
 import { GlobalModuleMap, JsonSpecs, FunctionSpec, TypeSpec, ModuleSpec, FunctionDescription } from './specs';
 import { SymbolTable } from './symbol-table';
-import { symbol } from 'prop-types';
 
 /**
  * Use a shared dataflow analyzer object for all dataflow analysis / querying for defs and uses.
@@ -17,6 +16,7 @@ export class DataflowAnalyzer {
 
   getDefsUses(
     statement: ast.SyntaxNode,
+    defsForMethodResolution: RefSet,
     symbolTable?: SymbolTable
   ): IDefUseInfo {
     symbolTable = symbolTable || new SymbolTable(this._specs);
@@ -25,7 +25,7 @@ export class DataflowAnalyzer {
     const cached = this._defUsesCache[cacheKey];
     if (cached) { return cached; }
 
-    let defSet = this.getDefs(statement, symbolTable, new RefSet());
+    let defSet = this.getDefs(statement, symbolTable, defsForMethodResolution);
     let useSet = this.getUses(statement, symbolTable);
     let result = { defs: defSet, uses: useSet };
     this._defUsesCache[cacheKey] = result;
@@ -38,6 +38,7 @@ export class DataflowAnalyzer {
     moduleMap?: JsonSpecs,
     namesDefined?: StringSet
   ): DataflowAnalysisResult {
+
     moduleMap = moduleMap || GlobalModuleMap;
     let symbolTable = new SymbolTable(moduleMap);
     const workQueue: Block[] = cfg.blocks.reverse();
@@ -71,14 +72,9 @@ export class DataflowAnalyzer {
         );
       }
 
-      // TODO: fix up dataflow computation within this block: check for definitions in
-      // defsWithinBlock first; if found, don't look to defs that come from the predecessor.
       for (let statement of block.statements) {
         // Note that defs includes both definitions and mutations and variables
-        let { defs: definedHere, uses: usedHere } = this.getDefsUses(
-          statement,
-          symbolTable
-        );
+        let { defs: definedHere, uses: usedHere } = this.getDefsUses(statement, defsForLevel[ReferenceType.UPDATE], symbolTable);
 
         // Sort definitions and uses into references.
         let statementRefs: { [level: string]: RefSet } = {};
@@ -100,11 +96,7 @@ export class DataflowAnalyzer {
         let newFlows = new Set<Dataflow>(getDataflowId);
         for (let level of Object.keys(ReferenceType)) {
           // For everything that's defined coming into this block, if it's used in this block, save connection.
-          let result = createFlowsFrom(
-            statementRefs[level],
-            defsForLevel[level],
-            statement
-          );
+          let result = createFlowsFrom(statementRefs[level], defsForLevel[level], statement);
           let flowsCreated = result[0].items;
           let defined = result[1];
           newFlows.add(...flowsCreated);
@@ -116,10 +108,7 @@ export class DataflowAnalyzer {
 
         for (let level of Object.keys(ReferenceType)) {
           // 🙄 it doesn't really make sense to update the "use" set for a block but whatever
-          defsForLevel[level] = updateDefsForLevel(
-            defsForLevel[level],
-            level,
-            statementRefs
+          defsForLevel[level] = updateDefsForLevel(defsForLevel[level], level, statementRefs
           );
         }
       }
@@ -153,39 +142,34 @@ export class DataflowAnalyzer {
     };
   }
 
-  getDefs(statement: ast.SyntaxNode, symbolTable: SymbolTable, previousDefs: RefSet): RefSet {
-    if (!statement) return previousDefs;
+  getDefs(statement: ast.SyntaxNode, symbolTable: SymbolTable, defsForMethodResolution: RefSet): RefSet {
+    if (!statement) return new RefSet();
 
-    runAnalysis(ApiCallAnalysis, previousDefs, statement, symbolTable);
-    runAnalysis(DefAnnotationAnalysis, previousDefs, statement, symbolTable);
+    let defs = runAnalysis(ApiCallAnalysis, defsForMethodResolution, statement, symbolTable)
+      .union(runAnalysis(DefAnnotationAnalysis, defsForMethodResolution, statement, symbolTable));
 
     switch (statement.type) {
-      case ast.IMPORT: {
-        this.getImportDefs(statement, previousDefs, symbolTable);
+      case ast.IMPORT:
+        defs = defs.union(this.getImportDefs(statement, symbolTable));
         break;
-      }
-      case ast.FROM: {
-        this.getImportFromDefs(statement, previousDefs, symbolTable);
+      case ast.FROM:
+        defs = defs.union(this.getImportFromDefs(statement, symbolTable));
         break;
-      }
-      case ast.ASSIGN: {
-        previousDefs = this.getAssignDefs(statement, previousDefs, symbolTable);
+      case ast.DEF:
+        defs = defs.union(this.getFuncDefs(statement));
         break;
-      }
-      case ast.DEF: {
-        this.getFuncDefs(statement, previousDefs, symbolTable);
+      case ast.CLASS:
+        defs = defs.union(this.getClassDefs(statement));
         break;
-      }
-      case ast.CLASS: {
-        this.getClassDefs(statement, previousDefs, symbolTable);
+      case ast.ASSIGN:
+        defs = defs.union(this.getAssignDefs(statement, symbolTable));
         break;
-      }
     }
-    return previousDefs;
+    return defs;
   }
 
-  private getClassDefs(classDecl: ast.Class, defs: RefSet, symbolTable: SymbolTable) {
-    defs.add({
+  private getClassDefs(classDecl: ast.Class) {
+    return new RefSet({
       type: SymbolType.CLASS,
       level: ReferenceType.DEFINITION,
       name: classDecl.name,
@@ -194,8 +178,8 @@ export class DataflowAnalyzer {
     });
   }
 
-  private getFuncDefs(funcDecl: ast.Def, defs: RefSet, symbolTable: SymbolTable) {
-    defs.add({
+  private getFuncDefs(funcDecl: ast.Def) {
+    return new RefSet({
       type: SymbolType.FUNCTION,
       level: ReferenceType.DEFINITION,
       name: funcDecl.name,
@@ -204,33 +188,29 @@ export class DataflowAnalyzer {
     });
   }
 
-  private getAssignDefs(assign: ast.Assignment, defs: RefSet, symbolTable: SymbolTable) {
+  private getAssignDefs(assign: ast.Assignment, symbolTable: SymbolTable) {
     let targetsDefListener = new TargetsDefListener(assign, symbolTable);
-    defs = defs.union(targetsDefListener.defs);
-    return defs;
+    return targetsDefListener.defs;
   }
 
-  private getImportFromDefs(from: ast.From, defs: RefSet, symbolTable: SymbolTable) {
-    let modnames: string[] = [];
-    if (from.imports.constructor === Array) {
-      defs.add(...from.imports.map(i => {
-        return {
-          type: SymbolType.IMPORT,
-          level: ReferenceType.DEFINITION,
-          name: i.name || i.path,
-          location: i.location,
-          statement: from,
-        };
-      }));
-      symbolTable.importModuleDefinitions(from.base, from.imports);
-    }
+  private getImportFromDefs(from: ast.From, symbolTable: SymbolTable) {
+    symbolTable.importModuleDefinitions(from.base, from.imports);
+    return new RefSet(...from.imports.map(i => {
+      return {
+        type: SymbolType.IMPORT,
+        level: ReferenceType.DEFINITION,
+        name: i.name || i.path,
+        location: i.location,
+        statement: from,
+      };
+    }));
   }
 
-  private getImportDefs(imprt: ast.Import, defs: RefSet, symbolTable: SymbolTable) {
+  private getImportDefs(imprt: ast.Import, symbolTable: SymbolTable) {
     imprt.names.forEach(imp => {
-      const spec = symbolTable.importModule(imp.path);
+      const spec = symbolTable.importModule(imp.path, imp.name);
     });
-    defs.add(...imprt.names.map(nameNode => {
+    return new RefSet(...imprt.names.map(nameNode => {
       return {
         type: SymbolType.IMPORT,
         level: ReferenceType.DEFINITION,
@@ -242,31 +222,22 @@ export class DataflowAnalyzer {
   }
 
   getUses(statement: ast.SyntaxNode, symbolTable: SymbolTable): RefSet {
-    let uses = new RefSet();
     switch (statement.type) {
-      // TODO: should we collect when importing with FROM from something else that was already imported...
-      case ast.ASSIGN: {
-        uses = this.getAssignUses(statement, uses);
-        break;
-      }
+      case ast.ASSIGN:
+        return this.getAssignUses(statement);
       case ast.DEF:
-        uses = this.getFuncDeclUses(statement, uses);
-        break;
+        return this.getFuncDeclUses(statement);
       case ast.CLASS:
-        this.getClassDeclUses(statement, uses, symbolTable);
-        break;
+        return this.getClassDeclUses(statement, symbolTable);
       default: {
-        uses = this.getNameUses(statement, uses);
-        break;
+        return this.getNameUses(statement);
       }
     }
-
-    return uses;
   }
 
-  private getNameUses(statement: ast.SyntaxNode, uses: RefSet) {
+  private getNameUses(statement: ast.SyntaxNode) {
     const usedNames = gatherNames(statement);
-    uses = new RefSet(...usedNames.items.map(([name, node]) => {
+    return new RefSet(...usedNames.items.map(([name, node]) => {
       return {
         type: SymbolType.VARIABLE,
         level: ReferenceType.USE,
@@ -275,22 +246,22 @@ export class DataflowAnalyzer {
         statement: statement,
       };
     }));
-    return uses;
   }
 
-  private getClassDeclUses(statement: ast.Class, uses: RefSet, symbolTable: SymbolTable) {
-    statement.code.forEach(classStatement => uses.add(...this.getUses(classStatement, symbolTable).items));
+  private getClassDeclUses(statement: ast.Class, symbolTable: SymbolTable) {
+    return statement.code.reduce((uses, classStatement) =>
+      uses.union(this.getUses(classStatement, symbolTable)),
+      new RefSet());
   }
 
-  private getFuncDeclUses(statement: ast.Def, uses: RefSet) {
+  private getFuncDeclUses(statement: ast.Def) {
     let defCfg = new ControlFlowGraph(statement);
     let argNames = new StringSet(...statement.params.map(p => p.name).filter(n => n != undefined));
     let undefinedRefs = this.analyze(defCfg, this._specs, argNames).undefinedRefs;
-    uses = undefinedRefs.filter(r => r.level == ReferenceType.USE);
-    return uses;
+    return undefinedRefs.filter(r => r.level == ReferenceType.USE);
   }
 
-  private getAssignUses(statement: ast.Assignment, uses: RefSet) {
+  private getAssignUses(statement: ast.Assignment) {
     // XXX: Is this supposed to union with funcArgs?
     const targetNames = gatherNames(statement.targets);
     const targets = new RefSet(...targetNames.items.map(([name, node]) => {
@@ -312,8 +283,7 @@ export class DataflowAnalyzer {
         statement: statement,
       };
     }));
-    uses = uses.union(sources).union(statement.op ? targets : new RefSet());
-    return uses;
+    return sources.union(statement.op ? targets : new RefSet());
   }
 
   private _specs: JsonSpecs;
@@ -406,18 +376,18 @@ interface IDefUseInfo {
 abstract class AnalysisWalker implements ast.WalkListener {
   readonly defs: RefSet = new RefSet();
   constructor(protected _statement: ast.SyntaxNode, protected symbolTable: SymbolTable) { }
-
-  onEnterNode?(node: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]) {
-
-  }
+  abstract onEnterNode?(node: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]);
 }
 
-function runAnalysis<T extends AnalysisWalker>(
-  Analysis: new (statement: ast.SyntaxNode, symbolTable: SymbolTable, refSet: RefSet) => T,
-  refSet: RefSet, statement: ast.SyntaxNode, symbolTable: SymbolTable) {
-  const walker = new Analysis(statement, symbolTable, refSet);
+function runAnalysis(
+  Analysis: new (statement: ast.SyntaxNode, symbolTable: SymbolTable, defsForMethodResolution: RefSet) => AnalysisWalker,
+  defsForMethodResolution: RefSet,
+  statement: ast.SyntaxNode,
+  symbolTable: SymbolTable
+) {
+  const walker = new Analysis(statement, symbolTable, defsForMethodResolution);
   ast.walk(statement, walker);
-  refSet.add(...walker.defs.items);
+  return walker.defs;
 }
 
 
@@ -471,7 +441,7 @@ class DefAnnotationAnalysis extends AnalysisWalker {
  */
 class ApiCallAnalysis extends AnalysisWalker {
 
-  constructor(statement: ast.SyntaxNode, symbolTable: SymbolTable, private refSet: RefSet) {
+  constructor(statement: ast.SyntaxNode, symbolTable: SymbolTable, private existingDefs: RefSet) {
     super(statement, symbolTable);
   }
 
@@ -481,14 +451,20 @@ class ApiCallAnalysis extends AnalysisWalker {
     let spec: FunctionSpec;
     const func = node.func;
     if (func.type === ast.DOT && func.value.type === ast.NAME) {
-      // It's a method call.
+      // It's a method call or module call.
       const receiver = func.value;
-      const ref = this.refSet.items.find(r => r.name === receiver.id);
+      const ref = this.existingDefs.items.find(r => r.name === receiver.id);
       if (ref) {
+        // The lefthand side of the dot is a variable we're tracking, so it's a method call.
         const receiverType = ref.inferredType;
         if (receiverType) {
           const funcName: string = func.name;
           spec = this.symbolTable.types[receiverType].methods.find(m => m.name === funcName);
+        }
+      } else {
+        const mod = this.symbolTable.modules[receiver.id];
+        if (mod) {
+          spec = mod.functions.find(f => f.name === func.name);
         }
       }
     } else if (func.type === ast.NAME) {

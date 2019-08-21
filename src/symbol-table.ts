@@ -1,4 +1,4 @@
-import { FunctionDescription, FunctionSpec, TypeSpec, ModuleSpec, JsonSpecs } from ".";
+import { FunctionDescription, FunctionSpec, TypeSpec, ModuleSpec, ModuleMap, JsonSpecs } from ".";
 
 function mapDict<U, V>(obj: { [item: string]: U }, f: (item: U) => V): { [item: string]: V } {
 	const result: { [item: string]: V } = {};
@@ -32,7 +32,7 @@ function cleanModule(mdesc: ModuleSpec<FunctionDescription>): ModuleSpec<Functio
 }
 
 export class SymbolTable {
-	public modules: ModuleSpec<FunctionSpec> = {};
+	public modules: ModuleMap<FunctionSpec> = {};
 	public types: { [name: string]: TypeSpec<FunctionSpec> } = {};
 	public functions: { [name: string]: FunctionSpec } = {};
 
@@ -51,14 +51,17 @@ export class SymbolTable {
 		return undefined;
 	}
 
-	public importModule(namePath: string): ModuleSpec<FunctionSpec> {
-		const spec = this.lookupSpec(this.moduleMap, namePath.split('.'));
+	public importModule(modulePath: string, alias: string): ModuleSpec<FunctionSpec> {
+		const spec = this.lookupSpec(this.moduleMap, modulePath.split('.'));
 		if (!spec) {
-			console.log(`*** WARNING no spec for module ${namePath}`);
+			console.log(`*** WARNING no spec for module ${modulePath}`);
 			return;
 		}
-		if (namePath) {
-			this.modules[namePath] = spec;
+		if (modulePath) {
+			this.modules[modulePath] = spec;
+			if (alias && alias.length) {
+				this.modules[alias] = spec;
+			}
 		}
 	}
 
