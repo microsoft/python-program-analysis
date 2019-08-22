@@ -77,4 +77,23 @@ describe('slice', () => {
     expect(lineNums).to.not.include(8);
   });
 
+  it('does the documentation example', () => {
+    const ast = parse([
+    /*1*/  'sum = 0',
+    /*2*/  'diff_sum = 0',
+    /*3*/  'for i in range(min(len(A), len(B))):',
+    /*4*/  '    sum += A[i] + B[i]',
+    /*5*/  '    diff_sum += A[i] - B[i]',
+    /*6*/  'print(sum)'
+    ].join('\n'));
+    const da = new DataflowAnalyzer();
+    const criterion = new LocationSet(loc(6, 0, 6, 10));
+    const locations = slice(ast, criterion, da);
+    const lineNums = locations.items.map(loc => loc.first_line);
+    [1, 3, 4, 6].forEach(line =>
+      expect(lineNums).to.include(line));
+    [2, 5].forEach(line =>
+      expect(lineNums).to.not.include(line));
+  });
+
 });

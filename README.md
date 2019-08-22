@@ -78,6 +78,78 @@ y = x * 2 -----> print(y)
 x += 1 -----> y = x * 2
 ```
 
+## Program Slicing
+
+Program slicing removes lines from a program that are unnecessary to see the effect of a chosen line of code. 
+For example, if we only care about the `print` statement in this program:
+```
+sum = 0
+diff_sum = 0
+for i in range(min(len(A), len(B))):
+    sum += A[i] + B[i]
+    diff_sum += A[i] - B[i]
+print(sum)
+```
+then we can simplify the code to this:
+```
+sum = 0
+for i in range(min(len(A), len(B))):
+    sum += A[i] + B[i]
+print(sum)
+```
+
+The function call `slice(`_P_`,`_loc_`)` takes a program _P_ (a parse tree) and a program location _loc_ and returns the program locations that are necessary for _loc_. 
+For example, to do the slicing example above, we call 
+`slice(ast, {first_line: 6, first_column: 0, last_line, 6: last_column: 10})` which returns a `LocationSet` whose members have `first_line` values of 1, 3, 4, and 6 (but not 2 or 5).
+
+## API Specs
+
+When deciding whether an API call needs to appear in a program slice, the slicing algorithm needs
+to know whether the call has a side-effect on the variables that are passed to it (including the `self` parameter for method calls). The call `f(x)` has a side-effect on `x` if `f` updates a field (`x.m = y`), updates an element (`x[i] = y`), updates a global variable, or transitively calls another function that has a side effect. Rather than analyzing the code of a called function (which may not even be available), we rely on having specifications, recorded in JSON files. Here is the specification `pandas.json` (with some lines omitted):
+```
+{
+  "pandas": {
+    "functions": [
+      "array",
+      "bdate_range",
+      ...
+      { "name": "read_clipboard", "returns": "DataFrame" },
+      { "name": "read_csv", "returns": "DataFrame" },
+      { "name": "read_excel", "returns": "DataFrame" },
+      ...
+    ],
+    "types": {
+      "DataFrame": {
+        "methods": [
+          "abs",
+          "add",
+          "add_prefix",
+          ...
+          { "name": "pop", "updates": [0] },
+          ...
+        ]
+      }
+    }
+  }
+}
+```
+A module's spec provides a list of the module's functions, types, and submodules. A type spec provides a list of the type's methods. In the function/method list, if a function/method appears just as a name (for example, `"array"` or `"abs"`), then it has no side-effects and doesn't return any objects with specifications. Otherwise, the function/method appears as a dictionary with its name in a `name` field and any of the following:
+* `updates` is an array of strings that lists the parameters that experience side-effects. 0 refers the `self` parameter, a number _k_ >= 1 refers to the _k_ th parameter, and any non-numeric string is the name of an updated global variable.
+* `reads` is an array of strings with the global variables that the method reads. (If a slice includes a call to a function that reads a global, then it must also include any calls that update that global.)
+* `returns` is the type of object the call returns, which is only necessary if that type has a spec. 
+
+The specs allow `slice` to analyze code like the following:
+```
+import pandas as pd
+d = pd.read_csv("some_path")
+d.pop("Column")
+d.memory_usage()
+d.count()            // ← slice on this line
+```
+Looking at the spec above, we can see that `read_csv` return a `DataFrame` object, so `d` is a `DataFrame`. The call to `pop` on `d` has a side-effect on the `self` parameter (`d`), because `DataFrame`'s `pop` spec has an `updates` of [0]. Therefore, this call to `pop` must appear in the slice. On the other hand, the call to `memory_usage` has no side-effects, so it can be left out. So, the final slice includes lines 1, 2, 3, and 5, but not 4.
+
+If there is no spec for an API call, then the data-flow and slicing algorithms conservatively assume that any passed parameter could experience a side-effect. 
+
 # Contributing
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a
