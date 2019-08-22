@@ -103,9 +103,9 @@ export class ProgramBuilder {
           defs = [];
           uses = [];
           for (let stmt of tree.code) {
-            let defsUses = this._dataflowAnalyzer.getDefsUses(stmt, new RefSet());
-            defs.push(...defsUses.defs.items);
-            uses.push(...defsUses.uses.items);
+            let defsUses = this._dataflowAnalyzer.getDefUseForStatement(stmt, new RefSet());
+            defs.push(...defsUses.DEFINITION.union(defsUses.UPDATE).items);
+            uses.push(...defsUses.USE.items);
           }
         } else {
           defs = [];

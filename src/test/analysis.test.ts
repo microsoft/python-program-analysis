@@ -3,7 +3,7 @@ import { SyntaxNode, parse } from '../python-parser';
 import { ControlFlowGraph } from '../control-flow';
 import { DataflowAnalyzer, Dataflow, Ref, ReferenceType, RefSet, SymbolType } from '../data-flow';
 import { Set } from '../set';
-import { JsonSpecs, GlobalModuleMap } from '../specs';
+import { JsonSpecs, DefaultSpecs } from '../specs';
 import { printNode } from '../printNode';
 import { SymbolTable } from '../symbol-table';
 
@@ -12,7 +12,7 @@ describe('detects dataflow dependencies', () => {
     let code = codeLines.concat('').join('\n'); // add newlines to end of every line.
     let analyzer = new DataflowAnalyzer();
     printNode;
-    return analyzer.analyze(new ControlFlowGraph(parse(code))).flows;
+    return analyzer.analyze(new ControlFlowGraph(parse(code))).dataflows;
   }
 
   function analyzeLineDeps(...codeLines: string[]): [number, number][] {
@@ -141,11 +141,11 @@ describe('detects control dependencies', () => {
 
 describe('getDefs', () => {
 
-  function getDefsFromStatements(mmap?: JsonSpecs, ...codeLines: string[]): Ref[] {
+  function getDefsFromStatements(specs?: JsonSpecs, ...codeLines: string[]): Ref[] {
     let code = codeLines.concat('').join('\n');
     let module = parse(code);
     let analyzer = new DataflowAnalyzer();
-    const symtab = new SymbolTable(mmap || GlobalModuleMap);
+    const symtab = new SymbolTable(specs || DefaultSpecs);
     return module.code.reduce((refSet, stmt) => {
       const refs = analyzer.getDefs(stmt, symtab, refSet);
       return refSet.union(refs);
@@ -156,7 +156,7 @@ describe('getDefs', () => {
     code: string,
     mmap?: JsonSpecs
   ): Ref[] {
-    mmap = mmap || GlobalModuleMap;
+    mmap = mmap || DefaultSpecs;
     code = code + '\n'; // programs need to end with newline
     let mod = parse(code);
     let analyzer = new DataflowAnalyzer(mmap);
@@ -314,8 +314,8 @@ describe('getDefs', () => {
       });
 
       it('can ignore the method receiver', () => {
-        const mmap = { __builtins__: { types: { C: { methods: ['m'] } } } };
-        let defs = getDefsFromStatements(mmap, 'x=C()', 'x.m()');
+        const specs = { __builtins__: { types: { C: { methods: ['m'] } } } };
+        let defs = getDefsFromStatements(specs, 'x=C()', 'x.m()');
         expect(defs).to.exist;
         expect(defs.length).to.equal(1);
         expect(defs[0].name).to.equal('x');
@@ -323,8 +323,8 @@ describe('getDefs', () => {
       });
 
       it('assumes method call affects the receiver, without a spec', () => {
-        const mmap = { __builtins__: {} };
-        let defs = getDefsFromStatements(mmap, 'x=C()', 'x.m()');
+        const specs = { __builtins__: {} };
+        let defs = getDefsFromStatements(specs, 'x=C()', 'x.m()');
         expect(defs).to.exist;
         expect(defs.length).to.equal(2);
         expect(defs[1].name).to.equal('x');
@@ -348,7 +348,7 @@ describe('getUses', () => {
     let mod = parse(code);
     let analyzer = new DataflowAnalyzer();
     return analyzer
-      .getUses(mod.code[0], new SymbolTable(GlobalModuleMap))
+      .getUses(mod.code[0], new SymbolTable(DefaultSpecs))
       .items.map(use => use.name);
   }
 

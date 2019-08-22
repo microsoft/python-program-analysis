@@ -79,6 +79,13 @@ export class Set<T> {
     this.remove(result);
     return result;
   }
+
+  public product(that: Set<T>): Set<[T, T]> {
+    return new Set(
+      ([x, y]) => this.getIdentifier(x) + that.getIdentifier(y),
+      ...flatten(...this.items.map(x =>
+        flatten(that.items.map<[T, T]>(y => [x, y])))));
+  }
 }
 
 export class StringSet extends Set<string> {
@@ -99,4 +106,9 @@ export function range(min: number, max: number): Set<number> {
     numbers.push(i);
   }
   return new NumberSet(...numbers);
+}
+
+
+function flatten<T>(...items: T[][]): T[] {
+  return [].concat(...items);
 }

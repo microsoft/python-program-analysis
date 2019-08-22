@@ -24,11 +24,21 @@ function cleanType(tdesc: TypeSpec<FunctionDescription>): TypeSpec<FunctionSpec>
 }
 
 function cleanModule(mdesc: ModuleSpec<FunctionDescription>): ModuleSpec<FunctionSpec> {
-	return {
+	const mod: ModuleSpec<FunctionSpec> = {
 		functions: mdesc.functions ? mdesc.functions.map(f => cleanFunc(f)) : [],
 		types: mdesc.types ? mapDict(mdesc.types, cleanType) : {},
 		modules: mdesc.modules ? mapDict(mdesc.modules, cleanModule) : {}
 	};
+	mod.functions.forEach(f => {
+		if (f.returns) { f.returnsType = mod.types[f.returns]; }
+	});
+	Object.keys(mod.types).forEach(typename => {
+		const ty = mod.types[typename];
+		ty.methods.forEach(f => {
+			if (f.returns) { f.returnsType = mod.types[f.returns]; }
+		});
+	});
+	return mod;
 }
 
 export class SymbolTable {
@@ -36,23 +46,29 @@ export class SymbolTable {
 	public types: { [name: string]: TypeSpec<FunctionSpec> } = {};
 	public functions: { [name: string]: FunctionSpec } = {};
 
-	constructor(private moduleMap: JsonSpecs) {
+	constructor(private jsonSpecs: JsonSpecs) {
 		// preload all the built-in functions.
 		this.importModuleDefinitions('__builtins__', [{ path: '*', name: '' }]);
 	}
 
-	public getFunction(name: string) {
+	public lookupFunction(name: string) {
 		const spec = this.functions[name];
 		if (spec) { return spec; }
 		const clss = this.types[name];
 		if (clss) {
-			return clss.methods.find(fn => fn.name === '__init__') || { name: '__init__', returns: name };
+			return clss.methods.find(fn => fn.name === '__init__') ||
+				{ name: '__init__', updates: ['0'], returns: name, returnsType: clss };
 		}
 		return undefined;
 	}
 
+	public lookupModuleFunction(modName: string, funcName: string) {
+		const mod = this.modules[modName];
+		return mod ? mod.functions.find(f => f.name === funcName) : undefined;
+	}
+
 	public importModule(modulePath: string, alias: string): ModuleSpec<FunctionSpec> {
-		const spec = this.lookupSpec(this.moduleMap, modulePath.split('.'));
+		const spec = this.lookupSpec(this.jsonSpecs, modulePath.split('.'));
 		if (!spec) {
 			console.log(`*** WARNING no spec for module ${modulePath}`);
 			return;
@@ -66,7 +82,7 @@ export class SymbolTable {
 	}
 
 	public importModuleDefinitions(namePath: string, imports: { path: string; name: string }[]): ModuleSpec<FunctionSpec> {
-		const spec = this.lookupSpec(this.moduleMap, namePath.split('.'));
+		const spec = this.lookupSpec(this.jsonSpecs, namePath.split('.'));
 		if (!spec) {
 			console.log(`*** WARNING no spec for module ${namePath}`);
 			return;

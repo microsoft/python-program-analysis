@@ -1,8 +1,68 @@
 import * as ast from './python-parser';
 import { Block, ControlFlowGraph } from './control-flow';
 import { Set, StringSet } from './set';
-import { GlobalModuleMap, JsonSpecs, FunctionSpec, TypeSpec, ModuleSpec, FunctionDescription } from './specs';
+import { DefaultSpecs, JsonSpecs, FunctionSpec, TypeSpec } from './specs';
 import { SymbolTable } from './symbol-table';
+
+
+class DefUse {
+  constructor(
+    public DEFINITION = new RefSet(),
+    public UPDATE = new RefSet(),
+    public USE = new RefSet()
+  ) { }
+
+  public get defs() { return this.DEFINITION.union(this.UPDATE); }
+
+  public union(that: DefUse) {
+    return new DefUse(
+      this.DEFINITION.union(that.DEFINITION),
+      this.UPDATE.union(that.UPDATE),
+      this.USE.union(that.USE));
+  }
+
+  public update(newRefs: DefUse) {
+
+    const GEN_RULES = {
+      USE: [ReferenceType.UPDATE, ReferenceType.DEFINITION],
+      UPDATE: [ReferenceType.DEFINITION],
+      DEFINITION: []
+    };
+
+    const KILL_RULES = {
+      // Which types of references "kill" which other types of references?
+      // In general, the rule of thumb here is, if x depends on y, x kills y, because anything that
+      // depends on x will now depend on y transitively.
+      // If x overwrites y, x also kills y.
+      // The one case where a variable doesn't kill a previous variable is the global configuration, because
+      // it neither depends on initializations or updates, nor clobbers them.
+      DEFINITION: [ReferenceType.DEFINITION, ReferenceType.UPDATE],
+      UPDATE: [ReferenceType.DEFINITION, ReferenceType.UPDATE],
+      USE: []
+    };
+
+    for (let level of Object.keys(ReferenceType)) {
+
+      let genSet = new RefSet();
+      for (let genLevel of GEN_RULES[level]) {
+        genSet = genSet.union(newRefs[genLevel]);
+      }
+      const killSet = this[level].filter(def =>
+        genSet.items.some(gen =>
+          gen.name == def.name && KILL_RULES[gen.level].indexOf(def.level) != -1));
+
+      this[level] = this[level].minus(killSet).union(genSet);
+    }
+  }
+
+  public equals(that: DefUse) {
+    return this.DEFINITION.equals(that.DEFINITION) &&
+      this.UPDATE.equals(that.UPDATE) &&
+      this.USE.equals(that.USE);
+  }
+
+}
+
 
 /**
  * Use a shared dataflow analyzer object for all dataflow analysis / querying for defs and uses.
@@ -11,14 +71,10 @@ import { SymbolTable } from './symbol-table';
  */
 export class DataflowAnalyzer {
   constructor(moduleMap?: JsonSpecs) {
-    this._specs = moduleMap || GlobalModuleMap;
+    this._specs = moduleMap || DefaultSpecs;
   }
 
-  getDefsUses(
-    statement: ast.SyntaxNode,
-    defsForMethodResolution: RefSet,
-    symbolTable?: SymbolTable
-  ): IDefUseInfo {
+  getDefUseForStatement(statement: ast.SyntaxNode, defsForMethodResolution: RefSet, symbolTable?: SymbolTable): DefUse {
     symbolTable = symbolTable || new SymbolTable(this._specs);
 
     let cacheKey = ast.locationString(statement.location);
@@ -27,119 +83,52 @@ export class DataflowAnalyzer {
 
     let defSet = this.getDefs(statement, symbolTable, defsForMethodResolution);
     let useSet = this.getUses(statement, symbolTable);
-    let result = { defs: defSet, uses: useSet };
+    let result = new DefUse(
+      defSet.filter(r => r.level === ReferenceType.DEFINITION),
+      defSet.filter(r => r.level === ReferenceType.UPDATE),
+      useSet
+    );
     this._defUsesCache[cacheKey] = result;
     return result;
   }
 
-  // tslint:disable-next-line: max-func-body-length
-  analyze(
-    cfg: ControlFlowGraph,
-    moduleMap?: JsonSpecs,
-    namesDefined?: StringSet
-  ): DataflowAnalysisResult {
-
-    moduleMap = moduleMap || GlobalModuleMap;
-    let symbolTable = new SymbolTable(moduleMap);
+  analyze(cfg: ControlFlowGraph, moduleMap?: JsonSpecs, namesDefined?: StringSet): DataflowAnalysisResult {
+    let symbolTable = new SymbolTable(moduleMap || DefaultSpecs);
     const workQueue: Block[] = cfg.blocks.reverse();
     let undefinedRefs = new RefSet();
-
-    let defsForLevelByBlock: {
-      [level: string]: { [blockId: number]: RefSet };
-    } = {};
-    for (let level of Object.keys(ReferenceType)) {
-      defsForLevelByBlock[level] = {};
-      for (let block of workQueue) {
-        defsForLevelByBlock[level][block.id] = new RefSet();
-      }
-    }
-
     let dataflows = new Set<Dataflow>(getDataflowId);
+    let defUsePerBlock = new Map(workQueue.map(block => [block.id, new DefUse()]));
 
     while (workQueue.length) {
       const block = workQueue.pop();
-
-      let oldDefsForLevel: { [level: string]: RefSet } = {};
-      let defsForLevel: { [level: string]: RefSet } = {};
-      for (let level of Object.keys(ReferenceType)) {
-        oldDefsForLevel[level] = defsForLevelByBlock[level][block.id];
-        // incoming definitions are come from predecessor blocks
-        defsForLevel[level] = oldDefsForLevel[level].union(
-          ...cfg
-            .getPredecessors(block)
-            .map(block => defsForLevelByBlock[level][block.id])
-            .filter(s => s != undefined)
-        );
-      }
+      let oldBlockDefUse = defUsePerBlock.get(block.id);
+      let blockDefUse = cfg.getPredecessors(block)
+        .reduce((defuse, predBlock) => defuse.union(defUsePerBlock.get(predBlock.id)), oldBlockDefUse);
 
       for (let statement of block.statements) {
-        // Note that defs includes both definitions and mutations and variables
-        let { defs: definedHere, uses: usedHere } = this.getDefsUses(statement, defsForLevel[ReferenceType.UPDATE], symbolTable);
-
-        // Sort definitions and uses into references.
-        let statementRefs: { [level: string]: RefSet } = {};
-        for (let level of Object.keys(ReferenceType)) {
-          statementRefs[level] = new RefSet();
-        }
-        for (let def of definedHere.items) {
-          statementRefs[def.level].add(def);
-          if (TYPES_WITH_DEPENDENCIES.indexOf(def.level) != -1) {
-            undefinedRefs.add(def);
-          }
-        }
-        for (let use of usedHere.items) {
-          statementRefs[ReferenceType.USE].add(use);
-          undefinedRefs.add(use);
-        }
-
-        // Get all new dataflow dependencies.
-        let newFlows = new Set<Dataflow>(getDataflowId);
-        for (let level of Object.keys(ReferenceType)) {
-          // For everything that's defined coming into this block, if it's used in this block, save connection.
-          let result = createFlowsFrom(statementRefs[level], defsForLevel[level], statement);
-          let flowsCreated = result[0].items;
-          let defined = result[1];
-          newFlows.add(...flowsCreated);
-          for (let ref of defined.items) {
-            undefinedRefs.remove(ref);
-          }
-        }
+        let statementDefUse = this.getDefUseForStatement(statement, blockDefUse.defs, symbolTable);
+        let [newFlows, definedRefs] = createFlowsFrom(statementDefUse, blockDefUse, statement);
         dataflows = dataflows.union(newFlows);
-
-        for (let level of Object.keys(ReferenceType)) {
-          // 🙄 it doesn't really make sense to update the "use" set for a block but whatever
-          defsForLevel[level] = updateDefsForLevel(defsForLevel[level], level, statementRefs
-          );
-        }
+        undefinedRefs = undefinedRefs.union(statementDefUse.UPDATE).union(statementDefUse.USE).minus(definedRefs);
+        blockDefUse.update(statementDefUse);
       }
 
-      // Check to see if definitions have changed. If so, redo the successor blocks.
-      for (let level of Object.keys(ReferenceType)) {
-        if (!oldDefsForLevel[level].equals(defsForLevel[level])) {
-          defsForLevelByBlock[level][block.id] = defsForLevel[level];
-          for (let succ of cfg.getSuccessors(block)) {
-            if (workQueue.indexOf(succ) < 0) {
-              workQueue.push(succ);
-            }
+      if (!oldBlockDefUse.equals(blockDefUse)) {
+        defUsePerBlock.set(block.id, blockDefUse);
+        // We've updated this block's info, so schedule its successor blocks.
+        for (let succ of cfg.getSuccessors(block)) {
+          if (workQueue.indexOf(succ) < 0) {
+            workQueue.push(succ);
           }
         }
       }
     }
 
-    // Check to see if any of the undefined names were defined coming into the graph. If so,
-    // don't report them as being undefined.
     if (namesDefined) {
-      for (let ref of undefinedRefs.items) {
-        if (namesDefined.items.some(n => n == ref.name)) {
-          undefinedRefs.remove(ref);
-        }
-      }
+      undefinedRefs = undefinedRefs.filter(r => !namesDefined.contains(r.name));
     }
 
-    return {
-      flows: dataflows,
-      undefinedRefs: undefinedRefs,
-    };
+    return { dataflows, undefinedRefs };
   }
 
   getDefs(statement: ast.SyntaxNode, symbolTable: SymbolTable, defsForMethodResolution: RefSet): RefSet {
@@ -287,7 +276,7 @@ export class DataflowAnalyzer {
   }
 
   private _specs: JsonSpecs;
-  private _defUsesCache: { [statementLocation: string]: IDefUseInfo } = {};
+  private _defUsesCache: { [statementLocation: string]: DefUse } = {};
 }
 
 
@@ -318,7 +307,7 @@ export interface Ref {
   type: SymbolType;
   level: ReferenceType;
   name: string;
-  inferredType?: string;
+  inferredType?: TypeSpec<FunctionSpec>;
   location: ast.Location;
   statement: ast.SyntaxNode;
 }
@@ -364,13 +353,6 @@ function gatherNames(node: ast.SyntaxNode | ast.SyntaxNode[]): NameSet {
   }
 }
 
-
-
-
-interface IDefUseInfo {
-  defs: RefSet;
-  uses: RefSet;
-}
 
 
 abstract class AnalysisWalker implements ast.WalkListener {
@@ -441,61 +423,62 @@ class DefAnnotationAnalysis extends AnalysisWalker {
  */
 class ApiCallAnalysis extends AnalysisWalker {
 
-  constructor(statement: ast.SyntaxNode, symbolTable: SymbolTable, private existingDefs: RefSet) {
+  constructor(statement: ast.SyntaxNode, symbolTable: SymbolTable, private variableDefs: RefSet) {
     super(statement, symbolTable);
   }
 
   onEnterNode(node: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]) {
     if (node.type !== ast.CALL) { return; }
 
-    let spec: FunctionSpec;
+    let funcSpec: FunctionSpec;
     const func = node.func;
     if (func.type === ast.DOT && func.value.type === ast.NAME) {
       // It's a method call or module call.
       const receiver = func.value;
-      const ref = this.existingDefs.items.find(r => r.name === receiver.id);
-      if (ref) {
-        // The lefthand side of the dot is a variable we're tracking, so it's a method call.
-        const receiverType = ref.inferredType;
-        if (receiverType) {
-          const funcName: string = func.name;
-          spec = this.symbolTable.types[receiverType].methods.find(m => m.name === funcName);
-        }
+      const moduleSpec = this.symbolTable.modules[receiver.id];
+      if (moduleSpec) {
+        // It's a module call.
+        funcSpec = moduleSpec.functions.find(f => f.name === func.name);
       } else {
-        const mod = this.symbolTable.modules[receiver.id];
-        if (mod) {
-          spec = mod.functions.find(f => f.name === func.name);
+        // It's a method call.
+        const ref = this.variableDefs.items.find(r => r.name === receiver.id);
+        if (ref) {
+          // The lefthand side of the dot is a variable we're tracking, so it's a method call.
+          const receiverType = ref.inferredType;
+          if (receiverType) {
+            const funcName: string = func.name;
+            funcSpec = receiverType.methods.find(m => m.name === funcName);
+          }
         }
       }
     } else if (func.type === ast.NAME) {
       // It's a function call.
-      spec = this.symbolTable.functions[func.id];
+      funcSpec = this.symbolTable.lookupFunction(func.id);
     }
 
-    if (spec) {
-      Object.keys(spec).forEach(paramName => {
+    if (funcSpec && funcSpec.updates) {
+      Object.keys(funcSpec.updates).forEach(paramName => {
         const position = parseInt(paramName);
-        if (position === NaN) { return; } // TODO: think about mutation of global variables
-        let name: string;
+        if (isNaN(position)) { return; } // TODO: think about mutation of global variables
+        let actualArgName: string;
         if (0 < position && position - 1 < node.args.length) {
           const arg = node.args[position - 1].actual;
-          if (arg.type === ast.NAME) { name = arg.id; }
+          if (arg.type === ast.NAME) { actualArgName = arg.id; }
         } else if (position === 0 && node.func.type === ast.DOT && node.func.value.type === ast.NAME) {
-          name = node.func.value.id;
+          actualArgName = node.func.value.id;
         }
-        if (name) {
+        if (actualArgName) {
           this.defs.add({
             type: SymbolType.MUTATION,
             level: ReferenceType.UPDATE,
-            name: name,
+            name: actualArgName,
             location: node.location,
             statement: this._statement,
           });
         }
       });
     } else {
-      // Be conservative. If we don't know what the call does, 
-      // assume that it mutates its arguments.
+      // Be conservative. If we don't know what the call does, assume that it mutates its arguments.
       node.args.forEach(arg => {
         if (arg.actual.type === ast.NAME) {
           const name = arg.actual.id;
@@ -540,14 +523,17 @@ class TargetsDefListener extends AnalysisWalker {
       }
     }
     assign.sources.forEach((source, i) => {
-      if (source.type === ast.CALL && source.func.type === ast.NAME) {
-        const spec = symbolTable.getFunction(source.func.id);
+      if (source.type === ast.CALL) {
+        const func = source.func;
+        const spec = func.type === ast.NAME ? symbolTable.lookupFunction(func.id) :
+          func.type === ast.DOT && func.value.type === ast.NAME ? symbolTable.lookupModuleFunction(func.value.id, func.name)
+            : undefined;
         if (spec && assign.targets[i]) {
           const target = assign.targets[i];
           if (target.type === ast.NAME) {
             const def = this.defs.items.find(d => d.name === target.id);
             if (def) {
-              def.inferredType = spec.returns;
+              def.inferredType = spec.returnsType;
             }
           }
         }
@@ -573,22 +559,23 @@ class TargetsDefListener extends AnalysisWalker {
 
 
 function getDataflowId(df: Dataflow) {
-  if (!df.fromNode.location)
-    console.log('*** FROM', df.fromNode, df.fromNode.location);
-  if (!df.toNode.location) console.log('*** TO', df.toNode, df.toNode.location);
+  if (!df.fromNode.location) { console.log('*** FROM', df.fromNode, df.fromNode.location); }
+  if (!df.toNode.location) { console.log('*** TO', df.toNode, df.toNode.location); }
   return `${ast.locationString(df.fromNode.location)}->${ast.locationString(df.toNode.location)}`;
 }
 
 
 
-function createFlowsFrom(fromSet: RefSet, toSet: RefSet, fromStatement: ast.SyntaxNode): [Set<Dataflow>, Set<Ref>] {
+function createFlowsFrom(fromSet: DefUse, toSet: DefUse, fromStatement: ast.SyntaxNode): [Set<Dataflow>, Set<Ref>] {
   let refsDefined = new RefSet();
   let newFlows = new Set<Dataflow>(getDataflowId);
-  for (let from of fromSet.items) {
-    for (let to of toSet.items) {
-      if (to.name == from.name) {
-        refsDefined.add(from);
-        newFlows.add({ fromNode: to.statement, toNode: fromStatement });
+  for (let level of Object.keys(ReferenceType)) {
+    for (let from of fromSet[level].items) {
+      for (let to of toSet[level].items) {
+        if (to.name == from.name) {
+          refsDefined.add(from);
+          newFlows.add({ fromNode: to.statement, toNode: fromStatement });
+        }
       }
     }
   }
@@ -596,71 +583,7 @@ function createFlowsFrom(fromSet: RefSet, toSet: RefSet, fromStatement: ast.Synt
 }
 
 
-
-let DEPENDENCY_RULES = [
-  // "from" depends on all reference types in "to"
-  {
-    from: ReferenceType.USE,
-    to: [ReferenceType.UPDATE, ReferenceType.DEFINITION],
-  },
-  {
-    from: ReferenceType.UPDATE,
-    to: [ReferenceType.DEFINITION],
-  },
-];
-
-let TYPES_WITH_DEPENDENCIES = DEPENDENCY_RULES.map(r => r.from);
-
-let KILL_RULES = [
-  // Which types of references "kill" which other types of references?
-  // In general, the rule of thumb here is, if x depends on y, x kills y, because anything that
-  // depends on x will now depend on y transitively.
-  // If x overwrites y, x also kills y.
-  // The one case where a variable doesn't kill a previous variable is the global configuration, because
-  // it neither depends on initializations or updates, nor clobbers them.
-  {
-    level: ReferenceType.DEFINITION,
-    kills: [ReferenceType.DEFINITION, ReferenceType.UPDATE],
-  },
-  {
-    level: ReferenceType.UPDATE,
-    kills: [ReferenceType.DEFINITION, ReferenceType.UPDATE],
-  },
-];
-
-
-
-function updateDefsForLevel(
-  defsForLevel: RefSet,
-  level: string,
-  newRefs: { [level: string]: RefSet }
-) {
-  let genSet = new RefSet();
-  let levelDependencies = DEPENDENCY_RULES.find(r => r.from == level);
-  for (let level of Object.keys(ReferenceType)) {
-    newRefs[level].items.forEach(ref => {
-      if (levelDependencies && levelDependencies.to.indexOf(ref.level) != -1) {
-        genSet.add(ref);
-      }
-    });
-  }
-  const killSet = defsForLevel.filter(def => {
-    let found = false;
-    genSet.items.forEach(gen => {
-      if (gen.name == def.name) {
-        let killRules = KILL_RULES.find(r => r.level == gen.level);
-        if (killRules && killRules.kills.indexOf(def.level) != -1) {
-          found = true;
-        }
-      }
-    });
-    return found;
-  });
-  return defsForLevel.minus(killSet).union(genSet);
-}
-
-
 export type DataflowAnalysisResult = {
-  flows: Set<Dataflow>;
+  dataflows: Set<Dataflow>;
   undefinedRefs: RefSet;
 };

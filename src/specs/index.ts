@@ -9,6 +9,7 @@ export interface FunctionSpec {
   updates?: (string | number)[];
   reads?: string[];
   returns?: string;
+  returnsType?: TypeSpec<FunctionSpec>;
   higherorder?: number;
 }
 
@@ -30,7 +31,7 @@ export interface ModuleMap<FD> {
 
 export type JsonSpecs = ModuleMap<FunctionDescription>;
 
-export const GlobalModuleMap: JsonSpecs = {
+export const DefaultSpecs: JsonSpecs = {
   ...builtins,
   ...random,
   ...matplotlib,

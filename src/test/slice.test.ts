@@ -46,15 +46,14 @@ describe('slice', () => {
       /*3*/  'd.pop("Column")',
       /*4*/  'd.memory_usage()',
       /*5*/  'd.count()'
-      ].join('\n'));
-      const da = new DataflowAnalyzer();
-      const criterion = new LocationSet(loc(5, 0, 5, 12));
-      const locations = slice(ast, criterion, da);
-      const lineNums = locations.items.map(loc => loc.first_line);
-      [1,2,3,5].forEach(line =>
-        expect(lineNums).to.include(line));
-      expect(lineNums).to.not.include(4);
-  
+    ].join('\n'));
+    const da = new DataflowAnalyzer();
+    const criterion = new LocationSet(loc(5, 0, 5, 12));
+    const locations = slice(ast, criterion, da);
+    const lineNums = locations.items.map(loc => loc.first_line);
+    [1, 2, 3, 5].forEach(line =>
+      expect(lineNums).to.include(line));
+    expect(lineNums).to.not.include(4);
   });
 
   it('joins inferred types', () => {
@@ -73,8 +72,9 @@ describe('slice', () => {
     const criterion = new LocationSet(loc(9, 0, 9, 12));
     const locations = slice(ast, criterion, da);
     const lineNums = locations.items.map(loc => loc.first_line);
-    [1,2,3,4,5,6,7,9].forEach(line =>
+    [1, 2, 3, 4, 5, 6, 7, 9].forEach(line =>
       expect(lineNums).to.include(line));
     expect(lineNums).to.not.include(8);
   });
+
 });
