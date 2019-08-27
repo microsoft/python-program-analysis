@@ -84,7 +84,6 @@ export function slice(
   dataflowAnalyzer = dataflowAnalyzer || new DataflowAnalyzer();
   const cfg = new ControlFlowGraph(ast);
   const dfa = dataflowAnalyzer.analyze(cfg).dataflows;
-  dfa.add(...cfg.getControlDependencies());
 
   // Include at least the full statements for each seed.
   let seedStatementLocations = new LocationSet();
@@ -134,7 +133,6 @@ export function sliceLines(code: string, relevantLineNumbers: NumberSet) {
   const cfg = new ControlFlowGraph(ast);
   let dataflowAnalyzer = new DataflowAnalyzer();
   const dfa = dataflowAnalyzer.analyze(cfg).dataflows;
-  dfa.add(...cfg.getControlDependencies());
 
   let lastSize: number;
   do {

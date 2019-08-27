@@ -3,6 +3,7 @@ import { Block, ControlFlowGraph } from './control-flow';
 import { Set, StringSet } from './set';
 import { DefaultSpecs, JsonSpecs, FunctionSpec, TypeSpec } from './specs';
 import { SymbolTable } from './symbol-table';
+import { symbol, func } from 'prop-types';
 
 
 class DefUse {
@@ -13,6 +14,7 @@ class DefUse {
   ) { }
 
   public get defs() { return this.DEFINITION.union(this.UPDATE); }
+  public get uses() { return this.UPDATE.union(this.USE); }
 
   public union(that: DefUse) {
     return new DefUse(
@@ -61,6 +63,22 @@ class DefUse {
       this.USE.equals(that.USE);
   }
 
+  public createFlowsFrom(fromSet: DefUse): [Set<Dataflow>, Set<Ref>] {
+    const toSet = this;
+    let refsDefined = new RefSet();
+    let newFlows = new Set<Dataflow>(getDataflowId);
+    for (let level of Object.keys(ReferenceType)) {
+      for (let to of toSet[level].items) {
+        for (let from of fromSet[level].items) {
+          if (from.name == to.name) {
+            refsDefined.add(to);
+            newFlows.add({ fromNode: from.node, toNode: to.node, fromRef: from, toRef: to });
+          }
+        }
+      }
+    }
+    return [newFlows, refsDefined];
+  }
 }
 
 
@@ -92,28 +110,31 @@ export class DataflowAnalyzer {
     return result;
   }
 
-  analyze(cfg: ControlFlowGraph, moduleMap?: JsonSpecs, namesDefined?: StringSet): DataflowAnalysisResult {
+  analyze(cfg: ControlFlowGraph, moduleMap?: JsonSpecs, refSet?: RefSet): DataflowAnalysisResult {
     let symbolTable = new SymbolTable(moduleMap || DefaultSpecs);
     const workQueue: Block[] = cfg.blocks.reverse();
     let undefinedRefs = new RefSet();
     let dataflows = new Set<Dataflow>(getDataflowId);
     let defUsePerBlock = new Map(workQueue.map(block => [block.id, new DefUse()]));
+    if (refSet) {
+      defUsePerBlock.get(cfg.blocks[0].id).update(new DefUse(refSet));
+    }
 
     while (workQueue.length) {
       const block = workQueue.pop();
-      let oldBlockDefUse = defUsePerBlock.get(block.id);
+      let initialBlockDefUse = defUsePerBlock.get(block.id);
       let blockDefUse = cfg.getPredecessors(block)
-        .reduce((defuse, predBlock) => defuse.union(defUsePerBlock.get(predBlock.id)), oldBlockDefUse);
+        .reduce((defuse, predBlock) => defuse.union(defUsePerBlock.get(predBlock.id)), initialBlockDefUse);
 
       for (let statement of block.statements) {
         let statementDefUse = this.getDefUseForStatement(statement, blockDefUse.defs, symbolTable);
-        let [newFlows, definedRefs] = createFlowsFrom(statementDefUse, blockDefUse, statement);
+        let [newFlows, definedRefs] = statementDefUse.createFlowsFrom(blockDefUse);
         dataflows = dataflows.union(newFlows);
-        undefinedRefs = undefinedRefs.union(statementDefUse.UPDATE).union(statementDefUse.USE).minus(definedRefs);
+        undefinedRefs = undefinedRefs.union(statementDefUse.uses).minus(definedRefs);
         blockDefUse.update(statementDefUse);
       }
 
-      if (!oldBlockDefUse.equals(blockDefUse)) {
+      if (!initialBlockDefUse.equals(blockDefUse)) {
         defUsePerBlock.set(block.id, blockDefUse);
         // We've updated this block's info, so schedule its successor blocks.
         for (let succ of cfg.getSuccessors(block)) {
@@ -124,9 +145,8 @@ export class DataflowAnalyzer {
       }
     }
 
-    if (namesDefined) {
-      undefinedRefs = undefinedRefs.filter(r => !namesDefined.contains(r.name));
-    }
+    cfg.visitControlDependencies((controlStmt, stmt) =>
+      dataflows.add({ fromNode: controlStmt, toNode: stmt }));
 
     return { dataflows, undefinedRefs };
   }
@@ -145,7 +165,7 @@ export class DataflowAnalyzer {
         defs = defs.union(this.getImportFromDefs(statement, symbolTable));
         break;
       case ast.DEF:
-        defs = defs.union(this.getFuncDefs(statement));
+        defs = defs.union(this.getFuncDefs(statement, symbolTable, defsForMethodResolution));
         break;
       case ast.CLASS:
         defs = defs.union(this.getClassDefs(statement));
@@ -163,17 +183,19 @@ export class DataflowAnalyzer {
       level: ReferenceType.DEFINITION,
       name: classDecl.name,
       location: classDecl.location,
-      statement: classDecl,
+      node: classDecl,
     });
   }
 
-  private getFuncDefs(funcDecl: ast.Def) {
+  private getFuncDefs(funcDecl: ast.Def, symbolTable: SymbolTable, defsForMethodResolution: RefSet) {
+    runAnalysis(ParameterSideEffectAnalysis, defsForMethodResolution, funcDecl, symbolTable);
+
     return new RefSet({
       type: SymbolType.FUNCTION,
       level: ReferenceType.DEFINITION,
       name: funcDecl.name,
       location: funcDecl.location,
-      statement: funcDecl,
+      node: funcDecl,
     });
   }
 
@@ -190,7 +212,7 @@ export class DataflowAnalyzer {
         level: ReferenceType.DEFINITION,
         name: i.name || i.path,
         location: i.location,
-        statement: from,
+        node: from,
       };
     }));
   }
@@ -205,7 +227,7 @@ export class DataflowAnalyzer {
         level: ReferenceType.DEFINITION,
         name: nameNode.name || nameNode.path,
         location: nameNode.location,
-        statement: imprt,
+        node: imprt,
       };
     }));
   }
@@ -232,47 +254,46 @@ export class DataflowAnalyzer {
         level: ReferenceType.USE,
         name: name,
         location: node.location,
-        statement: statement,
+        node: statement,
       };
     }));
   }
 
-  private getClassDeclUses(statement: ast.Class, symbolTable: SymbolTable) {
-    return statement.code.reduce((uses, classStatement) =>
+  private getClassDeclUses(classDecl: ast.Class, symbolTable: SymbolTable) {
+    return classDecl.code.reduce((uses, classStatement) =>
       uses.union(this.getUses(classStatement, symbolTable)),
       new RefSet());
   }
 
-  private getFuncDeclUses(statement: ast.Def) {
-    let defCfg = new ControlFlowGraph(statement);
-    let argNames = new StringSet(...statement.params.map(p => p.name).filter(n => n != undefined));
-    let undefinedRefs = this.analyze(defCfg, this._specs, argNames).undefinedRefs;
+  private getFuncDeclUses(def: ast.Def) {
+    let defCfg = new ControlFlowGraph(def);
+    let undefinedRefs = this.analyze(defCfg, this._specs, getParameterRefs(def)).undefinedRefs;
     return undefinedRefs.filter(r => r.level == ReferenceType.USE);
   }
 
-  private getAssignUses(statement: ast.Assignment) {
+  private getAssignUses(assign: ast.Assignment) {
     // XXX: Is this supposed to union with funcArgs?
-    const targetNames = gatherNames(statement.targets);
+    const targetNames = gatherNames(assign.targets);
     const targets = new RefSet(...targetNames.items.map(([name, node]) => {
       return {
         type: SymbolType.VARIABLE,
         level: ReferenceType.USE,
         name: name,
         location: node.location,
-        statement: statement,
+        node: assign,
       };
     }));
-    const sourceNames = gatherNames(statement.sources);
+    const sourceNames = gatherNames(assign.sources);
     const sources = new RefSet(...sourceNames.items.map(([name, node]) => {
       return {
         type: SymbolType.VARIABLE,
         level: ReferenceType.USE,
         name: name,
         location: node.location,
-        statement: statement,
+        node: assign,
       };
     }));
-    return sources.union(statement.op ? targets : new RefSet());
+    return sources.union(assign.op ? targets : new RefSet());
   }
 
   private _specs: JsonSpecs;
@@ -283,6 +304,8 @@ export class DataflowAnalyzer {
 export interface Dataflow {
   fromNode: ast.SyntaxNode;
   toNode: ast.SyntaxNode;
+  fromRef?: Ref;
+  toRef?: Ref;
 }
 
 
@@ -309,7 +332,7 @@ export interface Ref {
   name: string;
   inferredType?: TypeSpec<FunctionSpec>;
   location: ast.Location;
-  statement: ast.SyntaxNode;
+  node: ast.SyntaxNode;
 }
 
 
@@ -358,7 +381,7 @@ function gatherNames(node: ast.SyntaxNode | ast.SyntaxNode[]): NameSet {
 abstract class AnalysisWalker implements ast.WalkListener {
   readonly defs: RefSet = new RefSet();
   constructor(protected _statement: ast.SyntaxNode, protected symbolTable: SymbolTable) { }
-  abstract onEnterNode?(node: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]);
+  abstract onEnterNode?(node: ast.SyntaxNode, ancestors: ast.SyntaxNode[]);
 }
 
 function runAnalysis(
@@ -381,8 +404,8 @@ class DefAnnotationAnalysis extends AnalysisWalker {
     super(statement, symbolTable);
   }
 
-  onEnterNode(node: ast.SyntaxNode, type: string) {
-    if (type == ast.LITERAL) {
+  onEnterNode(node: ast.SyntaxNode) {
+    if (node.type == ast.LITERAL) {
       let literal = node as ast.Literal;
 
       // If this is a string, try to parse a def annotation from it
@@ -405,7 +428,7 @@ class DefAnnotationAnalysis extends AnalysisWalker {
                   last_line: defSpec.pos[1][0] + node.location.first_line,
                   last_column: defSpec.pos[1][1],
                 },
-                statement: this._statement,
+                node: this._statement,
               });
             }
           } catch (e) { }
@@ -427,7 +450,7 @@ class ApiCallAnalysis extends AnalysisWalker {
     super(statement, symbolTable);
   }
 
-  onEnterNode(node: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]) {
+  onEnterNode(node: ast.SyntaxNode, ancestors: ast.SyntaxNode[]) {
     if (node.type !== ast.CALL) { return; }
 
     let funcSpec: FunctionSpec;
@@ -457,8 +480,8 @@ class ApiCallAnalysis extends AnalysisWalker {
     }
 
     if (funcSpec && funcSpec.updates) {
-      Object.keys(funcSpec.updates).forEach(paramName => {
-        const position = parseInt(paramName);
+      funcSpec.updates.forEach(paramName => {
+        const position = typeof paramName === 'string' ? parseInt(paramName) : paramName;
         if (isNaN(position)) { return; } // TODO: think about mutation of global variables
         let actualArgName: string;
         if (0 < position && position - 1 < node.args.length) {
@@ -473,7 +496,7 @@ class ApiCallAnalysis extends AnalysisWalker {
             level: ReferenceType.UPDATE,
             name: actualArgName,
             location: node.location,
-            statement: this._statement,
+            node: this._statement,
           });
         }
       });
@@ -487,7 +510,7 @@ class ApiCallAnalysis extends AnalysisWalker {
             level: ReferenceType.UPDATE,
             name: name,
             location: node.location,
-            statement: this._statement,
+            node: this._statement,
           });
         }
       });
@@ -498,7 +521,7 @@ class ApiCallAnalysis extends AnalysisWalker {
           level: ReferenceType.UPDATE,
           name: name,
           location: node.location,
-          statement: this._statement,
+          node: this._statement,
         });
       }
     }
@@ -524,63 +547,135 @@ class TargetsDefListener extends AnalysisWalker {
     }
     assign.sources.forEach((source, i) => {
       if (source.type === ast.CALL) {
-        const func = source.func;
-        const spec = func.type === ast.NAME ? symbolTable.lookupFunction(func.id) :
-          func.type === ast.DOT && func.value.type === ast.NAME ? symbolTable.lookupModuleFunction(func.value.id, func.name)
-            : undefined;
-        if (spec && assign.targets[i]) {
-          const target = assign.targets[i];
-          if (target.type === ast.NAME) {
-            const def = this.defs.items.find(d => d.name === target.id);
-            if (def) {
-              def.inferredType = spec.returnsType;
-            }
+        const spec = symbolTable.lookupNode(source.func);
+        const target = assign.targets[i];
+        if (spec && target && target.type === ast.NAME) {
+          const def = this.defs.items.find(d => d.name === target.id);
+          if (def) {
+            def.inferredType = spec.returnsType;
           }
         }
       }
     });
   }
 
-  onEnterNode(target: ast.SyntaxNode, type: string, ancestors: ast.SyntaxNode[]) {
-    if (type == ast.NAME) {
+  onEnterNode(target: ast.SyntaxNode, ancestors: ast.SyntaxNode[]) {
+    if (target.type == ast.NAME) {
+      if (ancestors.length > 1) {
+        const parent = ancestors[0];
+        if (parent.type === ast.INDEX && parent.args.some(a => a === target)) {
+          return; // target not defined here. For example, i is not defined in A[i]
+        }
+      }
       const isUpdate = this.isAugAssign || ancestors.some(a => a.type == ast.DOT || a.type == ast.INDEX);
       this.defs.add({
         type: SymbolType.VARIABLE,
         level: isUpdate ? ReferenceType.UPDATE : ReferenceType.DEFINITION,
         location: target.location,
-        name: (target as ast.Name).id,
-        statement: this._statement,
+        name: target.id,
+        node: this._statement,
       });
     }
   }
 }
 
+class ParameterSideEffectAnalysis extends AnalysisWalker {
+  private flows: Set<Dataflow>;
+  private isMethod: boolean;
+  private spec: FunctionSpec;
+
+  constructor(private def: ast.Def, symbolTable: SymbolTable) {
+    super(def, symbolTable);
+    const cfg = new ControlFlowGraph(def);
+    this.flows = new DataflowAnalyzer().analyze(cfg, undefined, getParameterRefs(def)).dataflows;
+    this.flows = this.getTransitiveClosure(this.flows);
+    this.symbolTable.functions[def.name] = this.spec = { name: def.name, updates: [] };
+  }
+
+  private getTransitiveClosure(flows: Set<Dataflow>) {
+    const nodes = flows.map(getNodeId, df => df.fromNode).union(flows.map(getNodeId, df => df.toNode));
+    const result = new Set(getDataflowId, ...flows.items);
+    nodes.items.forEach(from =>
+      nodes.items.forEach(to =>
+        nodes.items.forEach(middle => {
+          if (flows.contains({ fromNode: from, toNode: middle }) &&
+            flows.contains({ fromNode: middle, toNode: to })) {
+            result.add({ fromNode: from, toNode: to });
+          }
+        })));
+    return result;
+  }
+
+  private checkParameterFlow(sideEffect: ast.SyntaxNode) {
+    this.def.params.forEach((parm, i) => {
+      // For a method, the first parameter is self, which we assign 0. The other parameters are numbered from 1.
+      // For a function def, the parameters are numbered from 1.
+      const parmNum = this.isMethod ? i : i + 1;
+      if (this.flows.contains({ fromNode: parm, toNode: sideEffect }) && this.spec.updates.indexOf(parmNum) < 0) {
+        this.spec.updates.push(parmNum);
+      }
+    });
+  }
+
+  onEnterNode(statement: ast.SyntaxNode, ancestors: ast.SyntaxNode[]) {
+    switch (statement.type) {
+      case ast.ASSIGN:
+        for (let target of statement.targets) {
+          if (target.type === ast.DOT) {
+            this.checkParameterFlow(statement);
+          } else if (target.type === ast.INDEX) {
+            this.checkParameterFlow(statement);
+          }
+        }
+        break;
+      case ast.CALL:
+        const funcSpec = this.symbolTable.lookupNode(statement.func);
+        const actuals = statement.args.map(a => a.actual);
+        this.def.params.forEach((param, i) => {
+          // For a method, the first parameter is self, which we assign 0. The other parameters are numbered from 1.
+          // For a function def, the parameters are numbered from 1.
+          const paramNum = this.isMethod ? i : i + 1;
+          if (funcSpec) {
+            // If we have a spec, see if the parameter is passed as an actual that's side-effected.
+            const paramFlows = this.flows.filter(f => f.fromNode === param && f.toNode === statement && f.toRef !== undefined);
+            const updates = funcSpec.updates.filter(u => typeof u === 'number') as number[];
+            if (updates.length > 0 && !paramFlows.empty && this.spec.updates.indexOf(paramNum) < 0) {
+              paramFlows.items.forEach(pf => {
+                if (updates.find(i => i > 0 && ast.walk(actuals[i - 1]).find(a => a.type === ast.NAME && a.id === pf.toRef.name))) {
+                  this.spec.updates.push(paramNum);
+                } else if (updates.indexOf(0) >= 0 && statement.func.type === ast.DOT && statement.func.value.type === ast.NAME && statement.func.value.id === pf.toRef.name) {
+                  this.spec.updates.push(0);
+                }
+              });
+            }
+          } else {
+            // No spec, be conservative and assume this parameter is side-effected.
+            this.spec.updates.push(paramNum);
+          }
+        });
+        break;
+    }
+  }
+}
 
 
+function getParameterRefs(def: ast.Def) {
+  return new RefSet(...def.params.map(p =>
+    ({ name: p.name, level: ReferenceType.DEFINITION, type: SymbolType.VARIABLE, location: p.location, node: p })));
+}
+
+function getNodeId(node: ast.SyntaxNode) {
+  return `${ast.locationString(node.location)}`;
+}
 
 function getDataflowId(df: Dataflow) {
   if (!df.fromNode.location) { console.log('*** FROM', df.fromNode, df.fromNode.location); }
   if (!df.toNode.location) { console.log('*** TO', df.toNode, df.toNode.location); }
-  return `${ast.locationString(df.fromNode.location)}->${ast.locationString(df.toNode.location)}`;
+  return `${getNodeId(df.fromNode)}->${getNodeId(df.toNode)}`;
 }
 
 
 
-function createFlowsFrom(fromSet: DefUse, toSet: DefUse, fromStatement: ast.SyntaxNode): [Set<Dataflow>, Set<Ref>] {
-  let refsDefined = new RefSet();
-  let newFlows = new Set<Dataflow>(getDataflowId);
-  for (let level of Object.keys(ReferenceType)) {
-    for (let from of fromSet[level].items) {
-      for (let to of toSet[level].items) {
-        if (to.name == from.name) {
-          refsDefined.add(from);
-          newFlows.add({ fromNode: to.statement, toNode: fromStatement });
-        }
-      }
-    }
-  }
-  return [newFlows, refsDefined];
-}
 
 
 export type DataflowAnalysisResult = {

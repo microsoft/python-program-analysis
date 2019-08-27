@@ -68,9 +68,8 @@ describe('slice', () => {
     /*8*/  'data.memory_usage()',
     /*9*/  'data.count()'
     ].join('\n'));
-    const da = new DataflowAnalyzer();
     const criterion = new LocationSet(loc(9, 0, 9, 12));
-    const locations = slice(ast, criterion, da);
+    const locations = slice(ast, criterion, new DataflowAnalyzer());
     const lineNums = locations.items.map(loc => loc.first_line);
     [1, 2, 3, 4, 5, 6, 7, 9].forEach(line =>
       expect(lineNums).to.include(line));
@@ -94,6 +93,82 @@ describe('slice', () => {
       expect(lineNums).to.include(line));
     [2, 5].forEach(line =>
       expect(lineNums).to.not.include(line));
+  });
+
+  it('eliminates functions without side-effects', () => {
+    const ast = parse([
+      /*1*/  'def innocent(i):',
+      /*2*/  '    [1,2,3][i] = 3',
+      /*3*/  'a=0',
+      /*4*/  'innocent(a)',
+      /*5*/  'b=2*a',
+      /*6*/  'print(b)'
+    ].join('\n'));
+    const da = new DataflowAnalyzer();
+    const criterion = new LocationSet(loc(6, 0, 6, 8));
+    const locations = slice(ast, criterion, da);
+    const lineNums = locations.items.map(loc => loc.first_line);
+    [3, 5, 6].forEach(line =>
+      expect(lineNums).to.include(line));
+    [1, 2, 4].forEach(line =>
+      expect(lineNums).to.not.include(line));
+  });
+
+  it('keeps functions with item updates', () => {
+    const ast = parse([
+      /*1*/  'def zap(x):',
+      /*2*/  '    x[1]="zap"',
+      /*3*/  'a=[1,2,3]',
+      /*4*/  'zap(a)',
+      /*5*/  'b=a[2]',
+      /*6*/  'print(b)'
+    ].join('\n'));
+    const da = new DataflowAnalyzer();
+    const criterion = new LocationSet(loc(6, 0, 6, 8));
+    const locations = slice(ast, criterion, da);
+    const lineNums = locations.items.map(loc => loc.first_line);
+    [1, 3, 4, 5, 6].forEach(line =>
+      expect(lineNums).to.include(line));
+  });
+
+  it('keeps functions with field updates', () => {
+    const ast = parse([
+      /*1*/  'class C:',
+      /*2*/  '    f = 0',
+      /*3*/  'def zap(x):',
+      /*4*/  '    x.f += 1',
+      /*5*/  'def innocent(x):',
+      /*6*/  '    print(x.f)',
+      /*7*/  'a=C()',
+      /*8*/  'zap(a)',
+      /*9*/  'innocent(a)',
+      /*10*/  'b=a.f',
+      /*11*/  'print(b)'
+    ].join('\n'));
+    const da = new DataflowAnalyzer();
+    const criterion = new LocationSet(loc(11, 0, 11, 8));
+    const locations = slice(ast, criterion, da);
+    const lineNums = locations.items.map(loc => loc.first_line);
+    [1, 3, 7, 8, 10, 11].forEach(line =>
+      expect(lineNums).to.include(line));
+    [5, 9].forEach(line =>
+      expect(lineNums).to.not.include(line));
+  });
+
+  it('handles transitive updates', () => {
+    const ast = parse([
+      /*1*/  'import pandas as pd',
+      /*2*/  'df=pd.read_from_csv("path")',
+      /*3*/  'def zap(x):',
+      /*4*/  '    x.pop("Column")',
+      /*5*/  'zap(df)',
+      /*6*/  'df.count()'
+    ].join('\n'));
+    const criterion = new LocationSet(loc(6, 0, 6, 10));
+    const locations = slice(ast, criterion, new DataflowAnalyzer());
+    const lineNums = locations.items.map(loc => loc.first_line);
+    [1, 2, 3, 5, 6].forEach(line =>
+      expect(lineNums).to.include(line));
   });
 
 });
