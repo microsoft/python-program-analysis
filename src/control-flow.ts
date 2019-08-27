@@ -359,8 +359,7 @@ export class ControlFlowGraph {
    * - p498-500: dominator trees and frontiers
    * - p544: postdominance and reverse dominance frontier
    */
-  public getControlDependencies(): Dataflow[] {
-    let dependencies: Dataflow[] = [];
+  public visitControlDependencies(visit: (controlStmt: ast.SyntaxNode, stmt: ast.SyntaxNode) => void) {
     let blocks = this.blocks;
 
     this.postdominators = this.findPostdominators(blocks);
@@ -378,13 +377,12 @@ export class ControlFlowGraph {
         for (let frontierBlock of frontier.items) {
           for (let controlStmt of frontierBlock.statements) {
             for (let stmt of block.statements) {
-              dependencies.push({ fromNode: controlStmt, toNode: stmt });
+              visit(controlStmt, stmt);
             }
           }
         }
       }
     }
-    return dependencies;
   }
 
   private postdominators = new PostdominatorSet();

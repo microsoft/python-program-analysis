@@ -89,10 +89,13 @@ describe('detects dataflow dependencies', () => {
 });
 
 describe('detects control dependencies', () => {
+
   function analyze(...codeLines: string[]): [number, number][] {
     let code = codeLines.concat('').join('\n'); // add newlines to end of every line.
-    let deps = new ControlFlowGraph(parse(code)).getControlDependencies();
-    return deps.map(dep => [dep.toNode.location.first_line, dep.fromNode.location.first_line]);
+    const deps: [number, number][] = [];
+    new ControlFlowGraph(parse(code)).visitControlDependencies((control, stmt) =>
+      deps.push([stmt.location.first_line, control.location.first_line]));
+    return deps;
   }
 
   it('to an if-statement', () => {

@@ -1,4 +1,5 @@
 import { FunctionDescription, FunctionSpec, TypeSpec, ModuleSpec, ModuleMap, JsonSpecs } from ".";
+import * as ast from './python-parser';
 
 function mapDict<U, V>(obj: { [item: string]: U }, f: (item: U) => V): { [item: string]: V } {
 	const result: { [item: string]: V } = {};
@@ -60,6 +61,12 @@ export class SymbolTable {
 				{ name: '__init__', updates: ['0'], returns: name, returnsType: clss };
 		}
 		return undefined;
+	}
+
+	public lookupNode(func: ast.SyntaxNode) {
+		return func.type === ast.NAME ? this.lookupFunction(func.id) :
+			func.type === ast.DOT && func.value.type === ast.NAME ? this.lookupModuleFunction(func.value.id, func.name)
+				: undefined;
 	}
 
 	public lookupModuleFunction(modName: string, funcName: string) {
