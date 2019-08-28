@@ -296,19 +296,19 @@ typedarglist_part
     | tfpdef '=' test
         { $1.default = $3; $$ = $1 }
     | '*' 
-        { $$ = { name: '', star: true } }
+        { $$ = { name: '', star: true, location: @$ } }
     | '*' tfpdef
-        { $$ = { name: $2, star: true } }
+        { $$ = { name: $2, star: true, location: @$ } }
     | '**' tfpdef
-        {  $$ = {name: $2, starstar: true} }
+        {  $$ = {name: $2, starstar: true, location: @$ } }
     ;
 
 // tfpdef: NAME [':' test]
 tfpdef
     : NAME
-        { $$ = { name: $1 } }
+        { $$ = { type: 'parameter', name: $1, location: @$ } }
     | NAME ':' test
-        { $$ = { name: $1, anno: $3 } }
+        { $$ = { type: 'parameter', name: $1, anno: $3, location: @$ } }
     ;
 
 // varargslist: NOTE to keep the grammar LALR, we approximate
@@ -323,15 +323,15 @@ varargslist
 
 varargspart
     : vfpdef
-        { $$ = [{ name: $1}] }
+        { $$ = [{ type: 'parameter', name: $1, location: @$ }] }
     | vfpdef '='test
-        { $$ = [{ name: $1, default_value: $3}] }
+        { $$ = [{ type: 'parameter', name: $1, default_value: $3, location: @$ }] }
     | '*'
-        { $$ = [{ name: '', star: true}] }
+        { $$ = [{ name: '', star: true, location: @$ }] }
     | '*' vfpdef
-        { $$ = [{ name: $2, star: true}] }
+        { $$ = [{ name: $2, star: true, location: @$ }] }
     | '**' vfpdef
-        { $$ = [{ name: $2, starstar: true}] }
+        { $$ = [{ name: $2, starstar: true, location: @$ }] }
     ;
 
 // vfpdef: NAME
