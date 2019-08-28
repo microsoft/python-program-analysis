@@ -3,6 +3,7 @@ import * as random from "./random.json";
 import * as matplotlib from "./matplotlib.json";
 import * as pandas from "./pandas.json";
 import * as sklearn from "./sklearn.json";
+import * as numpy from "./numpy.json";
 
 export interface FunctionSpec {
   name: string;
@@ -36,5 +37,6 @@ export const DefaultSpecs: JsonSpecs = {
   ...random,
   ...matplotlib,
   ...pandas,
-  ...sklearn
+  ...sklearn,
+  ...numpy
 };
