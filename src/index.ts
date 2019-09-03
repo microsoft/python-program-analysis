@@ -9,3 +9,4 @@ export * from './slice';
 export * from './cellslice';
 export * from './log-slicer';
 export * from './program-builder';
+export * from './specs/index';
