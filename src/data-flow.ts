@@ -89,18 +89,16 @@ class DefUse {
  */
 export class DataflowAnalyzer {
   constructor(moduleMap?: JsonSpecs) {
-    this._specs = moduleMap || DefaultSpecs;
+    this._symbolTable = new SymbolTable(moduleMap || DefaultSpecs);
   }
 
-  getDefUseForStatement(statement: ast.SyntaxNode, defsForMethodResolution: RefSet, symbolTable?: SymbolTable): DefUse {
-    symbolTable = symbolTable || new SymbolTable(this._specs);
-
+  getDefUseForStatement(statement: ast.SyntaxNode, defsForMethodResolution: RefSet): DefUse {
     let cacheKey = ast.locationString(statement.location);
     const cached = this._defUsesCache[cacheKey];
     if (cached) { return cached; }
 
-    let defSet = this.getDefs(statement, symbolTable, defsForMethodResolution);
-    let useSet = this.getUses(statement, symbolTable);
+    let defSet = this.getDefs(statement, defsForMethodResolution);
+    let useSet = this.getUses(statement);
     let result = new DefUse(
       defSet.filter(r => r.level === ReferenceType.DEFINITION),
       defSet.filter(r => r.level === ReferenceType.UPDATE),
@@ -110,8 +108,7 @@ export class DataflowAnalyzer {
     return result;
   }
 
-  analyze(cfg: ControlFlowGraph, moduleMap?: JsonSpecs, refSet?: RefSet): DataflowAnalysisResult {
-    let symbolTable = new SymbolTable(moduleMap || DefaultSpecs);
+  analyze(cfg: ControlFlowGraph, refSet?: RefSet): DataflowAnalysisResult {
     const workQueue: Block[] = cfg.blocks.reverse();
     let undefinedRefs = new RefSet();
     let dataflows = new Set<Dataflow>(getDataflowId);
@@ -127,7 +124,7 @@ export class DataflowAnalyzer {
         .reduce((defuse, predBlock) => defuse.union(defUsePerBlock.get(predBlock.id)), initialBlockDefUse);
 
       for (let statement of block.statements) {
-        let statementDefUse = this.getDefUseForStatement(statement, blockDefUse.defs, symbolTable);
+        let statementDefUse = this.getDefUseForStatement(statement, blockDefUse.defs);
         let [newFlows, definedRefs] = statementDefUse.createFlowsFrom(blockDefUse);
         dataflows = dataflows.union(newFlows);
         undefinedRefs = undefinedRefs.union(statementDefUse.uses).minus(definedRefs);
@@ -151,27 +148,27 @@ export class DataflowAnalyzer {
     return { dataflows, undefinedRefs };
   }
 
-  getDefs(statement: ast.SyntaxNode, symbolTable: SymbolTable, defsForMethodResolution: RefSet): RefSet {
+  getDefs(statement: ast.SyntaxNode, defsForMethodResolution: RefSet): RefSet {
     if (!statement) return new RefSet();
 
-    let defs = runAnalysis(ApiCallAnalysis, defsForMethodResolution, statement, symbolTable)
-      .union(runAnalysis(DefAnnotationAnalysis, defsForMethodResolution, statement, symbolTable));
+    let defs = runAnalysis(ApiCallAnalysis, defsForMethodResolution, statement, this._symbolTable)
+      .union(runAnalysis(DefAnnotationAnalysis, defsForMethodResolution, statement, this._symbolTable));
 
     switch (statement.type) {
       case ast.IMPORT:
-        defs = defs.union(this.getImportDefs(statement, symbolTable));
+        defs = defs.union(this.getImportDefs(statement));
         break;
       case ast.FROM:
-        defs = defs.union(this.getImportFromDefs(statement, symbolTable));
+        defs = defs.union(this.getImportFromDefs(statement));
         break;
       case ast.DEF:
-        defs = defs.union(this.getFuncDefs(statement, symbolTable, defsForMethodResolution));
+        defs = defs.union(this.getFuncDefs(statement, defsForMethodResolution));
         break;
       case ast.CLASS:
         defs = defs.union(this.getClassDefs(statement));
         break;
       case ast.ASSIGN:
-        defs = defs.union(this.getAssignDefs(statement, symbolTable));
+        defs = defs.union(this.getAssignDefs(statement));
         break;
     }
     return defs;
@@ -187,8 +184,8 @@ export class DataflowAnalyzer {
     });
   }
 
-  private getFuncDefs(funcDecl: ast.Def, symbolTable: SymbolTable, defsForMethodResolution: RefSet) {
-    runAnalysis(ParameterSideEffectAnalysis, defsForMethodResolution, funcDecl, symbolTable);
+  private getFuncDefs(funcDecl: ast.Def, defsForMethodResolution: RefSet) {
+    runAnalysis(ParameterSideEffectAnalysis, defsForMethodResolution, funcDecl, this._symbolTable);
 
     return new RefSet({
       type: SymbolType.FUNCTION,
@@ -199,13 +196,13 @@ export class DataflowAnalyzer {
     });
   }
 
-  private getAssignDefs(assign: ast.Assignment, symbolTable: SymbolTable) {
-    let targetsDefListener = new TargetsDefListener(assign, symbolTable);
+  private getAssignDefs(assign: ast.Assignment) {
+    let targetsDefListener = new TargetsDefListener(assign, this._symbolTable);
     return targetsDefListener.defs;
   }
 
-  private getImportFromDefs(from: ast.From, symbolTable: SymbolTable) {
-    symbolTable.importModuleDefinitions(from.base, from.imports);
+  private getImportFromDefs(from: ast.From) {
+    this._symbolTable.importModuleDefinitions(from.base, from.imports);
     return new RefSet(...from.imports.map(i => {
       return {
         type: SymbolType.IMPORT,
@@ -217,9 +214,9 @@ export class DataflowAnalyzer {
     }));
   }
 
-  private getImportDefs(imprt: ast.Import, symbolTable: SymbolTable) {
+  private getImportDefs(imprt: ast.Import) {
     imprt.names.forEach(imp => {
-      const spec = symbolTable.importModule(imp.path, imp.name);
+      const spec = this._symbolTable.importModule(imp.path, imp.name);
     });
     return new RefSet(...imprt.names.map(nameNode => {
       return {
@@ -232,14 +229,14 @@ export class DataflowAnalyzer {
     }));
   }
 
-  getUses(statement: ast.SyntaxNode, symbolTable: SymbolTable): RefSet {
+  getUses(statement: ast.SyntaxNode): RefSet {
     switch (statement.type) {
       case ast.ASSIGN:
         return this.getAssignUses(statement);
       case ast.DEF:
         return this.getFuncDeclUses(statement);
       case ast.CLASS:
-        return this.getClassDeclUses(statement, symbolTable);
+        return this.getClassDeclUses(statement);
       default: {
         return this.getNameUses(statement);
       }
@@ -259,15 +256,15 @@ export class DataflowAnalyzer {
     }));
   }
 
-  private getClassDeclUses(classDecl: ast.Class, symbolTable: SymbolTable) {
+  private getClassDeclUses(classDecl: ast.Class) {
     return classDecl.code.reduce((uses, classStatement) =>
-      uses.union(this.getUses(classStatement, symbolTable)),
+      uses.union(this.getUses(classStatement)),
       new RefSet());
   }
 
   private getFuncDeclUses(def: ast.Def) {
     let defCfg = new ControlFlowGraph(def);
-    let undefinedRefs = this.analyze(defCfg, this._specs, getParameterRefs(def)).undefinedRefs;
+    let undefinedRefs = this.analyze(defCfg, getParameterRefs(def)).undefinedRefs;
     return undefinedRefs.filter(r => r.level == ReferenceType.USE);
   }
 
@@ -296,7 +293,7 @@ export class DataflowAnalyzer {
     return sources.union(assign.op ? targets : new RefSet());
   }
 
-  private _specs: JsonSpecs;
+  private _symbolTable: SymbolTable;
   private _defUsesCache: { [statementLocation: string]: DefUse } = {};
 }
 
@@ -587,7 +584,7 @@ class ParameterSideEffectAnalysis extends AnalysisWalker {
   constructor(private def: ast.Def, symbolTable: SymbolTable) {
     super(def, symbolTable);
     const cfg = new ControlFlowGraph(def);
-    this.flows = new DataflowAnalyzer().analyze(cfg, undefined, getParameterRefs(def)).dataflows;
+    this.flows = new DataflowAnalyzer().analyze(cfg, getParameterRefs(def)).dataflows;
     this.flows = this.getTransitiveClosure(this.flows);
     this.symbolTable.functions[def.name] = this.spec = { name: def.name, updates: [] };
   }

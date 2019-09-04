@@ -147,10 +147,9 @@ describe('getDefs', () => {
   function getDefsFromStatements(specs?: JsonSpecs, ...codeLines: string[]): Ref[] {
     let code = codeLines.concat('').join('\n');
     let module = parse(code);
-    let analyzer = new DataflowAnalyzer();
-    const symtab = new SymbolTable(specs || DefaultSpecs);
+    let analyzer = new DataflowAnalyzer(specs || DefaultSpecs);
     return module.code.reduce((refSet, stmt) => {
-      const refs = analyzer.getDefs(stmt, symtab, refSet);
+      const refs = analyzer.getDefs(stmt, refSet);
       return refSet.union(refs);
     }, new RefSet()).items;
   }
@@ -163,7 +162,7 @@ describe('getDefs', () => {
     code = code + '\n'; // programs need to end with newline
     let mod = parse(code);
     let analyzer = new DataflowAnalyzer(mmap);
-    return analyzer.getDefs(mod.code[0], new SymbolTable(mmap), new RefSet())
+    return analyzer.getDefs(mod.code[0], new RefSet())
       .items;
   }
 
@@ -356,7 +355,7 @@ describe('getUses', () => {
     let mod = parse(code);
     let analyzer = new DataflowAnalyzer();
     return analyzer
-      .getUses(mod.code[0], new SymbolTable(DefaultSpecs))
+      .getUses(mod.code[0])
       .items.map(use => use.name);
   }
 

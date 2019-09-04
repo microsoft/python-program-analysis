@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { Location, parse } from '../python-parser';
+import { Location, parse, locationString } from '../python-parser';
 import { LocationSet, slice } from '../slice';
 import { DataflowAnalyzer } from '../data-flow';
 
@@ -169,6 +169,25 @@ describe('slice', () => {
     const lineNums = locations.items.map(loc => loc.first_line);
     [1, 2, 3, 5, 6].forEach(line =>
       expect(lineNums).to.include(line));
+  });
+
+  it("does jim's demo", () => {
+    const ast = parse([
+      /*1*/  "import pandas as pd",
+      /*2*/  "Cars = {'Brand': ['Honda Civic','Toyota Corolla','Ford Focus','Audi A4'], 'Price': [22000,25000,27000,35000]}",
+      /*3*/  "df = pd.DataFrame(Cars,columns= ['Brand', 'Price'])",
+      /*4*/  "def check(df, size=11):",
+      /*5*/  "    print(df)",
+      /*6*/  "print(df)",
+      /*7*/  "x = df['Brand'].values"
+    ].join('\n'));
+    const criterion = new LocationSet(loc(7, 0, 7, 21));
+    const locations = slice(ast, criterion, new DataflowAnalyzer());
+    const lineNums = locations.items.map(loc => loc.first_line);
+    [1, 2, 3, 7].forEach(line =>
+      expect(lineNums).to.include(line));
+    [4, 5, 6].forEach(line =>
+      expect(lineNums).to.not.include(line));
   });
 
 });
