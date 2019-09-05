@@ -74,7 +74,8 @@ export class MagicsRewriter {
    * Default rewrite rule for cell magics.
    */
   rewriteCellMagic(text: string): string {
-    if (text.match(/\s*%%/)) {
+    // 
+    if (text.match(/^[^#\s]*\s*%%/gm)) {
       return text
         .split('\n')
         .map(l => '#' + l)
