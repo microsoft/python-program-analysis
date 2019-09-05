@@ -41,13 +41,19 @@ describe('MagicsRewriter', () => {
   it('by default comments out cell magics', () => {
     let rewritten = rewrite('%%some_cell_magic', 'line 1', 'line 2');
     expect(rewritten).to.equal(
-      ['#%%some_cell_magic', '#line 1', '#line 2'].join('\n')
+      ['##%%some_cell_magic', '##line 1', '##line 2'].join('\n')
     );
   });
 
   it('allows cell magics to start after any number of whitespaces', () => {
     let rewritten = rewrite('   %%some_cell_magic');
-    expect(rewritten).to.equal('#   %%some_cell_magic');
+    expect(rewritten).to.equal('##   %%some_cell_magic');
+  });
+
+  it('does not treat VS Code cell markers as magic', () => {
+    const code = ['#%%', 'x=3'];
+    let rewritten = rewrite(...code);
+    expect(rewritten).to.equal(code.join('\n'));
   });
 
   it("does nothing to text that doesn't have magics", () => {
