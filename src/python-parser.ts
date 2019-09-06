@@ -40,6 +40,7 @@ export type SyntaxNode =
   | Parameter
   | Assignment
   | Assert
+  | Pass
   | Return
   | Yield
   | Raise
