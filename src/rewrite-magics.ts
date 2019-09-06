@@ -78,7 +78,7 @@ export class MagicsRewriter {
     if (text.match(/^[^#\s]*\s*%%/gm)) {
       return text
         .split('\n')
-        .map(l => '#' + l)
+        .map(l => '##' + l) // #%% is used for VS Code Python cell markers, so avoid that combo
         .join('\n');
     }
     return text;

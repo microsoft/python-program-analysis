@@ -16,6 +16,6 @@
 	},
 	"exclude": [
 		".vscode-test",
-		"dist",
+		"dist"
 	]
 }

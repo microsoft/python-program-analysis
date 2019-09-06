@@ -188,6 +188,12 @@ export interface Assert extends Locatable {
   err: SyntaxNode;
 }
 
+export const PASS = 'pass';
+
+export interface Pass extends Locatable {
+  type: typeof PASS;
+}
+
 export const RETURN = 'return';
 
 export interface Return extends Locatable {
