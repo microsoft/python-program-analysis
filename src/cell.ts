@@ -5,22 +5,6 @@ import { UUID } from '@phosphor/coreutils';
  * Generic interface for accessing data about a code cell.
  */
 export interface Cell {
-  /**
-   * The ID assigned to a cell by Jupyter Lab. This ID may change each time the notebook is open,
-   * due to the implementation of Jupyter Lab.
-   */
-  readonly id: string;
-
-  /**
-   * Whether this cell was created by gathering code.
-   */
-  gathered: boolean;
-
-  /**
-   * Whether this cell's text has been changed since its last execution. Undefined behavior when
-   * a cell has never been executed.
-   */
-  readonly dirty: boolean;
 
   /**
    * The cell's current text.
@@ -43,39 +27,17 @@ export interface Cell {
    */
   readonly persistentId: string;
 
-  outputs: nbformat.IOutput[];
-
   /**
    * Whether analysis or execution of this cell has yielded an error.
    */
   hasError: boolean;
 
   /**
-   * Flag used for type checking.
-   */
-  readonly is_cell: boolean;
-
-  /**
    * Create a deep copy of the cell.
    */
   deepCopy: () => Cell;
-
-  /**
-   * Create a new cell from this cell. The new cell will have null execution counts, and a new
-   * ID and persistent ID.
-   */
-  copyToNewCell: () => Cell;
-
-  /**
-   * Serialize this ICell to JSON that can be stored in a notebook file, or which can be used to
-   * create a new Jupyter cell.
-   */
-  serialize: () => nbformat.ICodeCell;
 }
 
-export function instanceOfICell(object: any): object is Cell {
-  return object && typeof object == 'object' && 'is_cell' in object;
-}
 
 /**
  * Abstract class for accessing cell data.
