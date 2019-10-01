@@ -6,6 +6,9 @@
 	"license": "MIT",
 	"files": ["dist", "cfg.png"],
 	"version": "0.3.0",
+	"publishConfig": {
+		"registry": "https://registry.npmjs.org/"
+	},
 	"repository": "http://www.github.com/microsoft/python-program-analysis",
 	"scripts": {
 		"build": "npm run build:parser && tsc && tsc -m es6 --outDir dist/es6 && webpack",
