@@ -4,6 +4,7 @@ import { CellSlice } from './cellslice';
 import { DataflowAnalyzer } from './data-flow';
 import { CellProgram, ProgramBuilder } from './program-builder';
 import { LocationSet, slice } from './slice';
+import { Set } from './set';
 
 /**
  * A record of when a cell was executed.
@@ -64,9 +65,8 @@ export class SlicedExecution {
  * Makes slice on a log of executed cells.
  */
 export class ExecutionLogSlicer {
-  public _executionLog: CellExecution[] = [];
-  public _programBuilder: ProgramBuilder;
-  private _dataflowAnalyzer: DataflowAnalyzer;
+  public executionLog: CellExecution[] = [];
+  public readonly programBuilder: ProgramBuilder;
 
   /**
    * Signal emitted when a cell's execution has been completely processed.
@@ -76,9 +76,8 @@ export class ExecutionLogSlicer {
   /**
    * Construct a new execution log slicer.
    */
-  constructor(dataflowAnalyzer: DataflowAnalyzer) {
-    this._dataflowAnalyzer = dataflowAnalyzer;
-    this._programBuilder = new ProgramBuilder(dataflowAnalyzer);
+  constructor(private dataflowAnalyzer: DataflowAnalyzer) {
+    this.programBuilder = new ProgramBuilder(dataflowAnalyzer);
   }
 
   /**
@@ -97,8 +96,8 @@ export class ExecutionLogSlicer {
    * notify all observers that this cell has been executed.
    */
   public addExecutionToLog(cellExecution: CellExecution) {
-    this._programBuilder.add(cellExecution.cell);
-    this._executionLog.push(cellExecution);
+    this.programBuilder.add(cellExecution.cell);
+    this.executionLog.push(cellExecution);
     this.executionLogged.emit(cellExecution);
   }
 
@@ -106,20 +105,20 @@ export class ExecutionLogSlicer {
    * Reset the log, removing log records.
    */
   public reset() {
-    this._executionLog = [];
-    this._programBuilder.reset();
+    this.executionLog = [];
+    this.programBuilder.reset();
   }
 
   /**
    * Get slice for the latest execution of a cell.
    */
   public sliceLatestExecution(
-    cell: Cell,
+    cellId: string,
     seedLocations?: LocationSet
   ): SlicedExecution {
     // XXX: This computes more than it has to, performing a slice on each execution of a cell
     // instead of just its latest computation. Optimize later if necessary.
-    return this.sliceAllExecutions(cell, seedLocations).pop();
+    return this.sliceAllExecutions(cellId, seedLocations).pop();
   }
 
   /**
@@ -127,33 +126,30 @@ export class ExecutionLogSlicer {
    * Relevant line numbers are relative to the cell's start line (starting at first line = 0).
    */
   public sliceAllExecutions(
-    cell: Cell,
-    pSeedLocations?: LocationSet
+    cellId: string,
+    seedLocations?: LocationSet
   ): SlicedExecution[] {
     // Make a map from cells to their execution times.
     let cellExecutionTimes: { [cellExecutionEventId: string]: Date } = {};
-    for (let execution of this._executionLog) {
+    for (let execution of this.executionLog) {
       cellExecutionTimes[execution.cell.executionEventId] =
         execution.executionTime;
     }
 
-    return this._executionLog
-      .filter(execution => execution.cell.persistentId == cell.persistentId)
+    return this.executionLog
+      .filter(execution => execution.cell.persistentId == cellId)
       .filter(execution => execution.cell.executionCount != undefined)
       .map(execution => {
         // Build the program up to that cell.
-        let program = this._programBuilder.buildTo(
+        let program = this.programBuilder.buildTo(
           execution.cell.executionEventId
         );
         if (program == null) return null;
 
         // Set the seed locations for the slice.
-        let seedLocations;
-        if (pSeedLocations) {
-          seedLocations = pSeedLocations;
+        if (!seedLocations) {
           // If seed locations weren't specified, slice the whole cell.
           // XXX: Whole cell specified by an unreasonably large character range.
-        } else {
           seedLocations = new LocationSet({
             first_line: 1,
             first_column: 1,
@@ -181,7 +177,7 @@ export class ExecutionLogSlicer {
         let sliceLocations = slice(
           program.tree,
           seedLocations,
-          this._dataflowAnalyzer
+          this.dataflowAnalyzer
         ).items.sort((loc1, loc2) => loc1.first_line - loc2.first_line);
 
         // Get the relative offsets of slice lines in each cell.
@@ -227,14 +223,37 @@ export class ExecutionLogSlicer {
       .filter(s => s != null && s != undefined);
   }
 
-  get cellExecutions(): ReadonlyArray<CellExecution> {
-    return this._executionLog;
+  public get cellExecutions(): ReadonlyArray<CellExecution> {
+    return this.executionLog;
   }
 
   /**
    * Get the cell program (tree, defs, uses) for a cell.
    */
-  getCellProgram(cell: Cell): CellProgram {
-    return this._programBuilder.getCellProgram(cell);
+  public getCellProgram(executionEventId: string): CellProgram {
+    return this.programBuilder.getCellProgram(executionEventId);
   }
+
+  /**
+   * Returns the cells that directly or indirectly use variables
+   * that are defined in the given cell.
+   * @param executionEventId a cell in the log
+   */
+  public getDependentCells(executionEventId: string): Cell[] {
+    const startingProg = this.getCellProgram(executionEventId);
+    const staleSet = new Set<Cell>(c => c.persistentId);
+    const work = [startingProg];
+    while (work.length) {
+      const cellProg = work.pop();
+      const deps = this.programBuilder.getDirectDependents(cellProg);
+      deps.forEach(dep => {
+        if (!staleSet.contains(dep.cell)) {
+          staleSet.add(dep.cell);
+          work.push(dep);
+        }
+      });
+    }
+    return staleSet.items;
+  }
+
 }

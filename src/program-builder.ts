@@ -224,15 +224,20 @@ export class ProgramBuilder {
     return new Program(code, tree, cellToLineMap, lineToCellMap);
   }
 
-  getCellProgram(cell: Cell): CellProgram {
+  getCellProgram(executionEventId: string): CellProgram {
     let matchingPrograms = this._cellPrograms.filter(
-      cp => cp.cell.executionEventId == cell.executionEventId
+      cp => cp.cell.executionEventId == executionEventId
     );
     if (matchingPrograms.length >= 1) return matchingPrograms.pop();
     return null;
   }
 
-  public _cellPrograms: CellProgram[];
+  public getDirectDependents(precendent: CellProgram): CellProgram[] {
+    const defs = new Set(precendent.defs.map(d => d.name));
+    return this._cellPrograms.filter(cp => cp.uses.some(use => defs.has(use.name)));
+  }
+
+  private _cellPrograms: CellProgram[];
   private _dataflowAnalyzer: DataflowAnalyzer;
   private _magicsRewriter: MagicsRewriter = new MagicsRewriter();
 }
