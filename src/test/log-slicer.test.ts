@@ -19,12 +19,12 @@ describe('log-slicer', () => {
 		const logSlicer = makeLog([
 			/*[1]*/  "import pandas as pd",
 			/*[2]*/  "Cars = {'Brand': ['Honda Civic','Toyota Corolla','Ford Focus','Audi A4'], 'Price': [22000,25000,27000,35000]}\n" +
-					  "df = pd.DataFrame(Cars,columns= ['Brand', 'Price'])",
+			"df = pd.DataFrame(Cars,columns= ['Brand', 'Price'])",
 			/*[3]*/  "def check(df, size=11):\n" +
-					  "    print(df)",
+			"    print(df)",
 			/*[4]*/  "print(df)",
 			/*[5]*/  "x = df['Brand'].values"
-		  ]);
+		]);
 		const lastCell = logSlicer.cellExecutions[logSlicer.cellExecutions.length - 1].cell;
 		const slice = logSlicer.sliceLatestExecution(lastCell.persistentId);
 		expect(slice).to.exist;
@@ -106,6 +106,39 @@ describe('log-slicer', () => {
 			const deplines = deps.map(d => d.text);
 			expect(deplines).includes(lines[1]);
 			expect(deplines).includes(lines[2]);
+		});
+
+		it("handles cell re-execution", () => {
+			const lines = [
+				"x = 2\nprint(x)",
+				"y = x+1\nprint(y)",
+				"q = 2"
+			];
+			const cells = lines.map((text, i) => new LogCell({ text: text, executionCount: i + 1 }));
+			cells.push(new LogCell(Object.assign({}, cells[0],
+				{ text: "x = 20\nprint(x)", executionCount: cells.length + 1 })));
+			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
+			cells.forEach(cell => logSlicer.logExecution(cell));
+			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[3].cell.executionEventId);
+			expect(deps).to.exist;
+			expect(deps).to.have.length(1);
+			expect(deps[0].text).equals(lines[1]);
+		});
+
+		it("handles cell re-execution no-op", () => {
+			const lines = [
+				"x = 2\nprint(x)",
+				"y = 3\nprint(y)",
+				"q = 2"
+			];
+			const cells = lines.map((text, i) => new LogCell({ text: text, executionCount: i + 1 }));
+			cells.push(new LogCell(Object.assign({}, cells[0],
+				{ text: "x = 20\nprint(x)", executionCount: cells.length + 1 })));
+			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
+			cells.forEach(cell => logSlicer.logExecution(cell));
+			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[3].cell.executionEventId);
+			expect(deps).to.exist;
+			expect(deps).to.have.length(0);
 		});
 	});
 

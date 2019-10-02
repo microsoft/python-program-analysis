@@ -234,7 +234,24 @@ export class ProgramBuilder {
 
   public getDirectDependents(precendent: CellProgram): CellProgram[] {
     const defs = new Set(precendent.defs.map(d => d.name));
-    return this._cellPrograms.filter(cp => cp.uses.some(use => defs.has(use.name)));
+    const runCells = new Set();
+    const result: CellProgram[] = [];
+    for (let i = this._cellPrograms.length - 1; i >= 0; i--) {
+      const logCell = this._cellPrograms[i];
+      if (logCell.cell.executionEventId === precendent.cell.executionEventId) {
+        // don't count itself
+        continue;
+      }
+      if (runCells.has(logCell.cell.persistentId)) {
+        // must be most recently run cell content
+        continue;
+      }
+      runCells.add(logCell.cell.persistentId);
+      if (logCell.uses.some(use => defs.has(use.name))) {
+        result.push(logCell);
+      }
+    }
+    return result;
   }
 
   private _cellPrograms: CellProgram[];

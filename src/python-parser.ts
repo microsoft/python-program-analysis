@@ -86,7 +86,7 @@ export interface Location extends JisonLocation {
 }
 
 export function locationString(loc: Location) {
-  return `${loc.last_line}:${loc.first_column}-${loc.last_line}:${loc.last_column}`;
+  return `${loc.path}${loc.last_line}:${loc.first_column}-${loc.last_line}:${loc.last_column}`;
 }
 
 
