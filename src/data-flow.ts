@@ -595,8 +595,8 @@ class ParameterSideEffectAnalysis extends AnalysisWalker {
     nodes.items.forEach(from =>
       nodes.items.forEach(to =>
         nodes.items.forEach(middle => {
-          if (flows.contains({ fromNode: from, toNode: middle }) &&
-            flows.contains({ fromNode: middle, toNode: to })) {
+          if (flows.has({ fromNode: from, toNode: middle }) &&
+            flows.has({ fromNode: middle, toNode: to })) {
             result.add({ fromNode: from, toNode: to });
           }
         })));
@@ -608,7 +608,7 @@ class ParameterSideEffectAnalysis extends AnalysisWalker {
       // For a method, the first parameter is self, which we assign 0. The other parameters are numbered from 1.
       // For a function def, the parameters are numbered from 1.
       const parmNum = this.isMethod ? i : i + 1;
-      if (this.flows.contains({ fromNode: parm, toNode: sideEffect }) && this.spec.updates.indexOf(parmNum) < 0) {
+      if (this.flows.has({ fromNode: parm, toNode: sideEffect }) && this.spec.updates.indexOf(parmNum) < 0) {
         this.spec.updates.push(parmNum);
       }
     });

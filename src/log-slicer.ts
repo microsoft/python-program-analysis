@@ -4,7 +4,7 @@ import { CellSlice } from './cellslice';
 import { DataflowAnalyzer } from './data-flow';
 import { CellProgram, ProgramBuilder } from './program-builder';
 import { LocationSet, slice } from './slice';
-import { Set } from './set';
+import { Set, StringSet } from './set';
 
 /**
  * A record of when a cell was executed.
@@ -31,7 +31,7 @@ export class CellExecution {
  * A slice over a version of executed code.
  */
 export class SlicedExecution {
-  constructor(public executionTime: Date, public cellSlices: CellSlice[]) {}
+  constructor(public executionTime: Date, public cellSlices: CellSlice[]) { }
 
   merge(...slicedExecutions: SlicedExecution[]): SlicedExecution {
     let cellSlices: { [cellExecutionEventId: string]: CellSlice } = {};
@@ -236,24 +236,27 @@ export class ExecutionLogSlicer {
 
   /**
    * Returns the cells that directly or indirectly use variables
-   * that are defined in the given cell.
+   * that are defined in the given cell. Result is in 
+   * topological order.
    * @param executionEventId a cell in the log
    */
   public getDependentCells(executionEventId: string): Cell[] {
     const startingProg = this.getCellProgram(executionEventId);
-    const staleSet = new Set<Cell>(c => c.persistentId);
+    const alreadySeen = new StringSet();
+    const result: Cell[] = [];
     const work = [startingProg];
     while (work.length) {
       const cellProg = work.pop();
       const deps = this.programBuilder.getDirectDependents(cellProg);
       deps.forEach(dep => {
-        if (!staleSet.contains(dep.cell)) {
-          staleSet.add(dep.cell);
+        if (!alreadySeen.has(dep.cell.persistentId)) {
+          alreadySeen.add(dep.cell.persistentId);
+          result.push(dep.cell);
           work.push(dep);
         }
       });
     }
-    return staleSet.items;
+    return result;
   }
 
 }

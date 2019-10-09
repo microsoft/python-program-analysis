@@ -78,6 +78,17 @@ describe('log-slicer', () => {
 			expect(deplines).includes(lines[3]);
 		});
 
+		it("handles no deps", () => {
+			const lines = [
+				"x = 3\nprint(x)",
+				"y = 2\nprint(y)",
+			];
+			const logSlicer = makeLog(lines);
+			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[0].cell.executionEventId);
+			expect(deps).to.exist;
+			expect(deps).to.have.length(0);
+		});
+
 		it("works transitively", () => {
 			const lines = [
 				"x = 3",
@@ -119,7 +130,8 @@ describe('log-slicer', () => {
 				{ text: "x = 20\nprint(x)", executionCount: cells.length + 1 })));
 			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
 			cells.forEach(cell => logSlicer.logExecution(cell));
-			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[3].cell.executionEventId);
+			const rerunFirst = logSlicer.cellExecutions[3].cell.executionEventId;
+			const deps = logSlicer.getDependentCells(rerunFirst);
 			expect(deps).to.exist;
 			expect(deps).to.have.length(1);
 			expect(deps[0].text).equals(lines[1]);
@@ -139,6 +151,28 @@ describe('log-slicer', () => {
 			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[3].cell.executionEventId);
 			expect(deps).to.exist;
 			expect(deps).to.have.length(0);
+		});
+
+		it("return result in topo order", () => {
+			const lines = [
+				"x = 1",
+				"y = 2*x",
+				"z = x*y"
+			];
+			const cells = lines.map((text, i) => new LogCell({ text: text, executionCount: i + 1 }));
+			cells.push(new LogCell(Object.assign({}, cells[0],
+				{ text: "x = 2", executionCount: cells.length + 1 })));
+			cells.push(new LogCell(Object.assign({}, cells[1],
+				{ text: "y = x*2", executionCount: cells.length + 1 })));
+			cells.push(new LogCell(Object.assign({}, cells[2],
+				{ text: "z = y*x", executionCount: cells.length + 1 })));
+			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
+			cells.forEach(cell => logSlicer.logExecution(cell));
+			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[0].cell.executionEventId);
+			expect(deps).to.exist;
+			expect(deps).to.have.length(2);
+			expect(deps[0].text).equals('y = x*2');
+			expect(deps[1].text).equals('z = y*x');
 		});
 	});
 

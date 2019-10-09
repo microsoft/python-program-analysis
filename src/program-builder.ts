@@ -2,7 +2,8 @@ import { Cell } from './cell';
 import * as ast from './python-parser';
 import { DataflowAnalyzer, Ref, RefSet } from './data-flow';
 import { MagicsRewriter } from './rewrite-magics';
-import { NumberSet } from './set';
+import { Set, NumberSet, StringSet } from './set';
+import { Graph } from './graph';
 
 /**
  * Maps to find out what line numbers over a program correspond to what cells.
@@ -61,6 +62,10 @@ export class CellProgram {
   readonly defs: Ref[];
   readonly uses: Ref[];
   readonly hasError: boolean;
+
+  public usesSomethingFrom(that: CellProgram) {
+    return this.uses.some(use => that.defs.some(def => use.name === def.name));
+  }
 }
 
 /**
@@ -232,26 +237,35 @@ export class ProgramBuilder {
     return null;
   }
 
+  /** 
+   * return the direct dependents in topological order 
+   **/
   public getDirectDependents(precendent: CellProgram): CellProgram[] {
-    const defs = new Set(precendent.defs.map(d => d.name));
-    const runCells = new Set();
-    const result: CellProgram[] = [];
+    const defs = new StringSet(...precendent.defs.map(d => d.name));
+    const runCells = new Set<CellProgram>(logcell => logcell.cell.persistentId);
+    const flowGraph = new Graph<CellProgram>(logcell => logcell.cell.persistentId);
     for (let i = this._cellPrograms.length - 1; i >= 0; i--) {
       const logCell = this._cellPrograms[i];
       if (logCell.cell.executionEventId === precendent.cell.executionEventId) {
         // don't count itself
         continue;
       }
-      if (runCells.has(logCell.cell.persistentId)) {
+      if (runCells.has(logCell)) {
         // must be most recently run cell content
         continue;
       }
-      runCells.add(logCell.cell.persistentId);
+      runCells.add(logCell);
       if (logCell.uses.some(use => defs.has(use.name))) {
-        result.push(logCell);
+        flowGraph.addEdge(precendent, logCell);
       }
     }
-    return result;
+    flowGraph.nodes.forEach(defNode =>
+      flowGraph.nodes.forEach(useNode => {
+        if (useNode !== defNode && useNode.usesSomethingFrom(defNode)) {
+          flowGraph.addEdge(defNode, useNode);
+        }
+      }));
+    return flowGraph.topoSort().slice(1); // first node is always "precedent"
   }
 
   private _cellPrograms: CellProgram[];
