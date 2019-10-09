@@ -159,16 +159,19 @@ describe('log-slicer', () => {
 				"y = 2*x",
 				"z = x*y"
 			];
-			const cells = lines.map((text, i) => new LogCell({ text: text, executionCount: i + 1 }));
+			const cells = lines.map((text, i) => new LogCell({ text, id: i.toString(), persistentId: i.toString(), executionCount: i + 1 }));
 			cells.push(new LogCell(Object.assign({}, cells[0],
 				{ text: "x = 2", executionCount: cells.length + 1 })));
 			cells.push(new LogCell(Object.assign({}, cells[1],
 				{ text: "y = x*2", executionCount: cells.length + 1 })));
 			cells.push(new LogCell(Object.assign({}, cells[2],
 				{ text: "z = y*x", executionCount: cells.length + 1 })));
+			cells.push(new LogCell(Object.assign({}, cells[0],
+				{ text: "x = 3", executionCount: cells.length + 1 })));
 			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
 			cells.forEach(cell => logSlicer.logExecution(cell));
-			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[0].cell.executionEventId);
+			const lastEvent = logSlicer.cellExecutions[logSlicer.cellExecutions.length - 1].cell.executionEventId;
+			const deps = logSlicer.getDependentCells(lastEvent);
 			expect(deps).to.exist;
 			expect(deps).to.have.length(2);
 			expect(deps[0].text).equals('y = x*2');
