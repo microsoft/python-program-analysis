@@ -216,7 +216,9 @@ export class ProgramBuilder {
   }
 
   buildFrom(cellExecutionEventId: string): Program {
-    let i = this._cellPrograms.findIndex(cp => cp.cell.executionEventId === cellExecutionEventId);
+    const cellProgram = this._cellPrograms.find(cp => cp.cell.executionEventId === cellExecutionEventId);
+    if (!cellProgram) { return null; }
+    const i = this._cellPrograms.findIndex(cp => cp.cell.persistentId === cellProgram.cell.persistentId);
     return new Program(this._cellPrograms.slice(i));
   }
 
