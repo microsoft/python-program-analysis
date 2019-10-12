@@ -73,6 +73,14 @@ export class Set<T> {
     return new Set(getIdentifier, ...this.items.map(transform));
   }
 
+  public mapSame(transform: (item: T) => T) {
+    return new Set(this.getIdentifier, ...this.items.map(transform));
+  }
+
+  public some(predicate: (item: T) => boolean): boolean {
+    return this.items.some(predicate);
+  }
+
   public minus(that: Set<T>): Set<T> {
     return new Set(
       this.getIdentifier,

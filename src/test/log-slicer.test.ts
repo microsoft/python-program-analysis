@@ -48,34 +48,22 @@ describe('log-slicer', () => {
 			expect(deps[0].text).to.equal(lines[1]);
 		});
 
-		it("handles out of order execution", () => {
-			const lines = [
-				"x = 3",
-				"y = x+1",
-				"x = 4"
-			];
-			const logSlicer = makeLog(lines);
-			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[2].cell.executionEventId);
-			expect(deps).to.exist;
-			expect(deps).to.have.length(1);
-			expect(deps[0].text).to.equal(lines[1]);
-		});
-
-		it("handles multiple defs", () => {
+		it("handles variable redefinition", () => {
 			const lines = [
 				"x = 3",
 				"y = x+1",
 				"x = 4",
 				"y = x*2",
-				"x = 5"
 			];
 			const logSlicer = makeLog(lines);
-			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[4].cell.executionEventId);
+			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[0].cell.executionEventId);
 			expect(deps).to.exist;
-			expect(deps).to.have.length(2);
-			const deplines = deps.map(d => d.text);
-			expect(deplines).includes(lines[1]);
-			expect(deplines).includes(lines[3]);
+			expect(deps).to.have.length(1);
+			expect(deps[0].text).to.equal(lines[1]);
+			const deps2 = logSlicer.getDependentCells(logSlicer.cellExecutions[2].cell.executionEventId);
+			expect(deps2).to.exist;
+			expect(deps2).to.have.length(1);
+			expect(deps2[0].text).to.equal(lines[3]);
 		});
 
 		it("handles no deps", () => {
@@ -176,6 +164,61 @@ describe('log-slicer', () => {
 			expect(deps).to.have.length(2);
 			expect(deps[0].text).equals('y = x*2');
 			expect(deps[1].text).equals('z = y*x');
+		});
+
+		it("can be called multiple times", () => {
+			const lines = [
+				"x = 1",
+				"y = 2*x",
+				"z = x*y"
+			];
+			const cells = lines.map((text, i) => new LogCell({ text, id: i.toString(), persistentId: i.toString(), executionCount: i + 1 }));
+			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
+			cells.forEach(cell => logSlicer.logExecution(cell));
+			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[0].cell.executionEventId);
+			expect(deps).to.exist;
+			expect(deps).to.have.length(2);
+			expect(deps[0].text).equals('y = 2*x');
+			expect(deps[1].text).equals('z = x*y');
+
+			logSlicer.logExecution(new LogCell(Object.assign({}, cells[0],
+				{ text: "x = 2", executionCount: cells.length + 1 })));
+			logSlicer.logExecution(new LogCell(Object.assign({}, cells[1],
+				{ text: "y = x*2", executionCount: cells.length + 1 })));
+			logSlicer.logExecution(new LogCell(Object.assign({}, cells[2],
+				{ text: "z = y*x", executionCount: cells.length + 1 })));
+			logSlicer.logExecution(new LogCell(Object.assign({}, cells[0],
+				{ text: "x = 3", executionCount: cells.length + 1 })));
+			const lastEvent = logSlicer.cellExecutions[logSlicer.cellExecutions.length - 1].cell.executionEventId;
+			const deps2 = logSlicer.getDependentCells(lastEvent);
+			expect(deps2).to.exist;
+			expect(deps2).to.have.length(2);
+			expect(deps2[0].text).equals('y = x*2');
+			expect(deps2[1].text).equals('z = y*x');
+		});
+
+		it("handles api calls", () => {
+			const lines = [
+				"from matplotlib.pyplot import scatter\nfrom sklearn.cluster import KMeans\nfrom sklearn import datasets",
+				"data = datasets.load_iris().data[:,2:4]\npetal_length, petal_width = data[:,1], data[:,0]",
+				"k=3",
+				"clusters = KMeans(n_clusters=k).fit(data).labels_",
+				"scatter(petal_length, petal_width, c=clusters)"
+			];
+			const cells = lines.map((text, i) => new LogCell({ text: text, executionCount: i + 1 }));
+			cells.push(new LogCell(Object.assign({}, cells[2],
+				{ text: "k=4", executionCount: cells.length + 1 })));
+				
+			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
+			cells.forEach(cell => logSlicer.logExecution(cell));
+
+			const lastEvent = logSlicer.cellExecutions[logSlicer.cellExecutions.length - 1].cell.executionEventId;
+			const deps = logSlicer.getDependentCells(lastEvent);
+			expect(deps).to.exist;
+			expect(deps).to.have.length(2);
+			const sliceText = deps.map(c => c.text);
+			expect(sliceText).to.include(lines[3]);
+			expect(sliceText).to.include(lines[4]);
 		});
 	});
 

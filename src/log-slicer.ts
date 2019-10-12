@@ -3,7 +3,7 @@ import { Cell } from './cell';
 import { CellSlice } from './cellslice';
 import { DataflowAnalyzer } from './data-flow';
 import { CellProgram, ProgramBuilder } from './program-builder';
-import { LocationSet, slice } from './slice';
+import { LocationSet, slice, SliceDirection } from './slice';
 import { Set, StringSet } from './set';
 
 /**
@@ -130,21 +130,17 @@ export class ExecutionLogSlicer {
     seedLocations?: LocationSet
   ): SlicedExecution[] {
     // Make a map from cells to their execution times.
-    let cellExecutionTimes: { [cellExecutionEventId: string]: Date } = {};
-    for (let execution of this.executionLog) {
-      cellExecutionTimes[execution.cell.executionEventId] =
-        execution.executionTime;
-    }
+    const cellExecutionTimes = new Map(this.executionLog.map(e =>
+      [e.cell.executionEventId, e.executionTime]));
 
     return this.executionLog
-      .filter(execution => execution.cell.persistentId == cellId)
-      .filter(execution => execution.cell.executionCount != undefined)
+      .filter(execution =>
+        execution.cell.persistentId == cellId &&
+        execution.cell.executionCount)
       .map(execution => {
         // Build the program up to that cell.
-        let program = this.programBuilder.buildTo(
-          execution.cell.executionEventId
-        );
-        if (program == null) return null;
+        let program = this.programBuilder.buildTo(execution.cell.executionEventId);
+        if (!program) { return null; }
 
         // Set the seed locations for the slice.
         if (!seedLocations) {
@@ -159,26 +155,21 @@ export class ExecutionLogSlicer {
         }
 
         // Set seed locations were specified relative to the last cell's position in program.
-        let lastCellLines =
-          program.cellToLineMap[execution.cell.executionEventId];
+        let lastCellLines = program.cellToLineMap[execution.cell.executionEventId];
         let lastCellStart = Math.min(...lastCellLines.items);
-        seedLocations = new LocationSet(
-          ...seedLocations.items.map(loc => {
-            return {
-              first_line: lastCellStart + loc.first_line - 1,
-              first_column: loc.first_column,
-              last_line: lastCellStart + loc.last_line - 1,
-              last_column: loc.last_column,
-            };
-          })
-        );
+        seedLocations = seedLocations.mapSame(loc => ({
+          first_line: lastCellStart + loc.first_line - 1,
+          first_column: loc.first_column,
+          last_line: lastCellStart + loc.last_line - 1,
+          last_column: loc.last_column,
+        }));
 
         // Slice the program
         let sliceLocations = slice(
           program.tree,
           seedLocations,
           this.dataflowAnalyzer
-        ).items.sort((loc1, loc2) => loc1.first_line - loc2.first_line);
+        ).items;//.sort((loc1, loc2) => loc1.first_line - loc2.first_line);
 
         // Get the relative offsets of slice lines in each cell.
         let cellSliceLocations: {
@@ -206,18 +197,11 @@ export class ExecutionLogSlicer {
         });
 
         let cellSlices = cellOrder.map(
-          (sliceCell): CellSlice => {
-            let executionTime = undefined;
-            if (cellExecutionTimes[sliceCell.executionEventId]) {
-              executionTime = cellExecutionTimes[sliceCell.executionEventId];
-            }
-            return new CellSlice(
-              sliceCell,
-              cellSliceLocations[sliceCell.executionEventId],
-              executionTime
-            );
-          }
-        );
+          sliceCell => new CellSlice(
+            sliceCell,
+            cellSliceLocations[sliceCell.executionEventId],
+            cellExecutionTimes[sliceCell.executionEventId]
+          ));
         return new SlicedExecution(execution.executionTime, cellSlices);
       })
       .filter(s => s != null && s != undefined);
@@ -241,22 +225,15 @@ export class ExecutionLogSlicer {
    * @param executionEventId a cell in the log
    */
   public getDependentCells(executionEventId: string): Cell[] {
-    const startingProg = this.getCellProgram(executionEventId);
-    const alreadySeen = new StringSet();
-    const result: Cell[] = [];
-    const work = [startingProg];
-    while (work.length) {
-      const cellProg = work.pop();
-      const deps = this.programBuilder.getDirectDependents(cellProg);
-      deps.forEach(dep => {
-        if (!alreadySeen.has(dep.cell.persistentId)) {
-          alreadySeen.add(dep.cell.persistentId);
-          result.push(dep.cell);
-          work.push(dep);
-        }
-      });
-    }
-    return result;
+    let program = this.programBuilder.buildFrom(executionEventId);
+    const lines = program.cellToLineMap[executionEventId];
+    const seedLocations = new LocationSet(
+      ...lines.items.map(line =>
+        ({ first_line: line, first_column: 0, last_line: line, last_column: 1 })));
+    let sliceLocations = slice(program.tree, seedLocations, undefined, SliceDirection.Forward).items;
+    return new Set<Cell>(c => c.persistentId,
+      ...sliceLocations.map(loc => program.lineToCellMap[loc.first_line]))
+      .items.filter(c => c.executionEventId !== executionEventId);
   }
 
 }
