@@ -4,7 +4,7 @@ import { CellSlice } from './cellslice';
 import { DataflowAnalyzer } from './data-flow';
 import { CellProgram, ProgramBuilder } from './program-builder';
 import { LocationSet, slice, SliceDirection } from './slice';
-import { Set, StringSet } from './set';
+import { Set, StringSet, NumberSet } from './set';
 
 /**
  * A record of when a cell was executed.
@@ -225,8 +225,11 @@ export class ExecutionLogSlicer {
    * @param executionEventId a cell in the log
    */
   public getDependentCells(executionEventId: string): Cell[] {
-    let program = this.programBuilder.buildFrom(executionEventId);
-    const lines = program.cellToLineMap[executionEventId];
+    const program = this.programBuilder.buildFrom(executionEventId);
+    const sameCell = this.programBuilder.getCellProgramsWithSameId(executionEventId);
+    let lines = new NumberSet();
+    sameCell.forEach(cp => 
+      lines = lines.union(program.cellToLineMap[cp.cell.executionEventId]));
     const seedLocations = new LocationSet(
       ...lines.items.map(line =>
         ({ first_line: line, first_column: 0, last_line: line, last_column: 1 })));

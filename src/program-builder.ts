@@ -134,7 +134,7 @@ export class ProgramBuilder {
   /**
    * Add cells to the program builder.
    */
-  add(...cells: Cell[]) {
+  public add(...cells: Cell[]) {
     for (let cell of cells) {
       // Proactively try to parse and find defs and uses in each block.
       // If there is a failure, discard that cell.
@@ -186,7 +186,7 @@ export class ProgramBuilder {
   /**
    * Reset (removing all cells).
    */
-  reset() {
+  public reset() {
     this._cellPrograms = [];
   }
 
@@ -195,7 +195,7 @@ export class ProgramBuilder {
    * the order they were added to the log. It will omit cells that raised errors (syntax or
    * runtime, except for the last cell).
    */
-  buildTo(cellExecutionEventId: string): Program {
+  public buildTo(cellExecutionEventId: string): Program {
     let cellPrograms: CellProgram[] = [];
     let i: number;
     for (i = this._cellPrograms.length - 1; i >= 0 && this._cellPrograms[i].cell.executionEventId !== cellExecutionEventId; i--);
@@ -215,20 +215,23 @@ export class ProgramBuilder {
     return new Program(cellPrograms);
   }
 
-  buildFrom(cellExecutionEventId: string): Program {
-    const cellProgram = this._cellPrograms.find(cp => cp.cell.executionEventId === cellExecutionEventId);
+  public buildFrom(executionEventId: string): Program {
+    const cellProgram = this.getCellProgram(executionEventId);
     if (!cellProgram) { return null; }
     const i = this._cellPrograms.findIndex(cp => cp.cell.persistentId === cellProgram.cell.persistentId);
     return new Program(this._cellPrograms.slice(i));
   }
 
 
-  getCellProgram(executionEventId: string): CellProgram {
-    let matchingPrograms = this._cellPrograms.filter(
-      cp => cp.cell.executionEventId == executionEventId
-    );
-    if (matchingPrograms.length >= 1) return matchingPrograms.pop();
+  public getCellProgram(executionEventId: string): CellProgram {
+    let matchingPrograms = this._cellPrograms.filter(cp => cp.cell.executionEventId == executionEventId);
+    if (matchingPrograms.length >= 1) { return matchingPrograms.pop(); }
     return null;
+  }
+
+  public getCellProgramsWithSameId(executionEventId: string): CellProgram[] {
+    const cellProgram = this.getCellProgram(executionEventId);
+    return this._cellPrograms.filter(cp => cp.cell.persistentId === cellProgram.cell.persistentId);
   }
 
   private _cellPrograms: CellProgram[];
