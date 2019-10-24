@@ -1,8 +1,9 @@
 import { expect } from 'chai';
 import { SlicedExecution } from '../log-slicer';
 import { LocationSet } from '../slice';
-import { Cell, LogCell } from '../cell';
+import { Cell } from '../cell';
 import { CellSlice } from '../cellslice';
+import { TestCell } from './testcell';
 
 describe('SlicedExecution', () => {
   function cell(
@@ -12,7 +13,7 @@ describe('SlicedExecution', () => {
     id?: string
   ): Cell {
     if (executionCount === undefined) executionCount = 1;
-    return new LogCell({ executionCount, text, executionEventId, id });
+    return new TestCell(text, executionCount, executionEventId, id);
   }
 
   function cellSlice(cell: Cell, slice: LocationSet): CellSlice {

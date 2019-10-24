@@ -1,6 +1,5 @@
 import { Graph } from "../graph";
 import { expect } from "chai";
-import { string } from "prop-types";
 
 describe('graph', () => {
 

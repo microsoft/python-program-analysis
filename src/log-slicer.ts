@@ -1,19 +1,18 @@
-import { Signal } from '@phosphor/signaling';
 import { Cell } from './cell';
 import { CellSlice } from './cellslice';
 import { DataflowAnalyzer } from './data-flow';
 import { CellProgram, ProgramBuilder } from './program-builder';
 import { LocationSet, slice, SliceDirection } from './slice';
-import { Set, StringSet, NumberSet } from './set';
+import { Set, NumberSet } from './set';
 
 /**
  * A record of when a cell was executed.
  */
-export class CellExecution {
-  readonly cell: Cell;
+export class CellExecution<TCell extends Cell> {
+  readonly cell: TCell;
   readonly executionTime: Date;
 
-  constructor(cell: Cell, executionTime: Date) {
+  constructor(cell: TCell, executionTime: Date) {
     this.cell = cell;
     this.executionTime = executionTime;
   }
@@ -61,17 +60,20 @@ export class SlicedExecution {
   }
 }
 
+
+export type CellExecutionCallback<TCell extends Cell> = (exec: CellExecution<TCell>) => void;
+
 /**
  * Makes slice on a log of executed cells.
  */
-export class ExecutionLogSlicer {
-  public executionLog: CellExecution[] = [];
+export class ExecutionLogSlicer<TCell extends Cell> {
+  public executionLog: CellExecution<TCell>[] = [];
   public readonly programBuilder: ProgramBuilder;
 
   /**
    * Signal emitted when a cell's execution has been completely processed.
    */
-  readonly executionLogged = new Signal<this, CellExecution>(this);
+  readonly executionLogged: CellExecutionCallback<TCell>[] = [];
 
   /**
    * Construct a new execution log slicer.
@@ -84,8 +86,8 @@ export class ExecutionLogSlicer {
    * Log that a cell has just been executed. The execution time for this cell will be stored
    * as the moment at which this method is called.
    */
-  public logExecution(cell: Cell) {
-    let cellExecution = new CellExecution(cell, new Date());
+  public logExecution(cell: TCell) {
+    let cellExecution = new CellExecution<TCell>(cell, new Date());
     this.addExecutionToLog(cellExecution);
   }
 
@@ -95,10 +97,10 @@ export class ExecutionLogSlicer {
    * when a notebook is reloaded. However, any method that eventually calls this method will
    * notify all observers that this cell has been executed.
    */
-  public addExecutionToLog(cellExecution: CellExecution) {
+  public addExecutionToLog(cellExecution: CellExecution<TCell>) {
     this.programBuilder.add(cellExecution.cell);
     this.executionLog.push(cellExecution);
-    this.executionLogged.emit(cellExecution);
+    this.executionLogged.forEach(callback => callback(cellExecution));
   }
 
   /**
@@ -169,7 +171,7 @@ export class ExecutionLogSlicer {
           program.tree,
           seedLocations,
           this.dataflowAnalyzer
-        ).items;//.sort((loc1, loc2) => loc1.first_line - loc2.first_line);
+        ).items.sort((loc1, loc2) => loc1.first_line - loc2.first_line);
 
         // Get the relative offsets of slice lines in each cell.
         let cellSliceLocations: {
@@ -207,7 +209,7 @@ export class ExecutionLogSlicer {
       .filter(s => s != null && s != undefined);
   }
 
-  public get cellExecutions(): ReadonlyArray<CellExecution> {
+  public get cellExecutions(): ReadonlyArray<CellExecution<TCell>> {
     return this.executionLog;
   }
 

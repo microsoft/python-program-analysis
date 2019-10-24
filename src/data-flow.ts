@@ -3,7 +3,6 @@ import { Block, ControlFlowGraph } from './control-flow';
 import { Set, StringSet } from './set';
 import { DefaultSpecs, JsonSpecs, FunctionSpec, TypeSpec } from './specs';
 import { SymbolTable } from './symbol-table';
-import { symbol, func } from 'prop-types';
 
 
 class DefUse {

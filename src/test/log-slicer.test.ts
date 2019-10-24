@@ -1,13 +1,14 @@
 import { ExecutionLogSlicer } from '../log-slicer';
-import { Location, LogCell, DataflowAnalyzer } from '..';
+import { Location, DataflowAnalyzer } from '..';
 import { expect } from 'chai';
+import { TestCell } from './testcell';
 
 function loc(line0: number, col0: number, line1 = line0 + 1, col1 = 0): Location {
 	return { first_line: line0, first_column: col0, last_line: line1, last_column: col1 };
 }
 
 function makeLog(lines: string[]) {
-	const cells = lines.map((text, i) => new LogCell({ text: text, executionCount: i + 1 }));
+	const cells = lines.map((text, i) => new TestCell(text, i + 1));
 	const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
 	cells.forEach(cell => logSlicer.logExecution(cell));
 	return logSlicer;
@@ -15,8 +16,26 @@ function makeLog(lines: string[]) {
 
 describe('log-slicer', () => {
 
+	it('does the basics', () => {
+		const lines = ['x=5', 'y=6', 'print(x+y)'];
+		const logSlicer = makeLog(lines);
+		const lastCell = logSlicer.cellExecutions[logSlicer.cellExecutions.length - 1].cell;
+		const slices = logSlicer.sliceAllExecutions(lastCell.persistentId);
+		expect(slices).to.exist;
+		expect(slices.length).eq(1);
+		const slice = slices[0];
+		expect(slice).to.exist;
+		expect(slice.cellSlices).to.exist;
+		expect(slice.cellSlices.length).eq(3);
+		slice.cellSlices.forEach((cs, i) => {
+			expect(cs).to.exist;
+			expect(cs.textSliceLines).eq(lines[i]);
+			expect(cs.textSlice).eq(lines[i]);
+		});
+	});
+
 	it("does jim's demo", () => {
-		const logSlicer = makeLog([
+		const lines = [
 			/*[1]*/  "import pandas as pd",
 			/*[2]*/  "Cars = {'Brand': ['Honda Civic','Toyota Corolla','Ford Focus','Audi A4'], 'Price': [22000,25000,27000,35000]}\n" +
 			"df = pd.DataFrame(Cars,columns= ['Brand', 'Price'])",
@@ -24,13 +43,14 @@ describe('log-slicer', () => {
 			"    print(df)",
 			/*[4]*/  "print(df)",
 			/*[5]*/  "x = df['Brand'].values"
-		]);
+		];
+		const logSlicer = makeLog(lines);
 		const lastCell = logSlicer.cellExecutions[logSlicer.cellExecutions.length - 1].cell;
 		const slice = logSlicer.sliceLatestExecution(lastCell.persistentId);
 		expect(slice).to.exist;
 		expect(slice.cellSlices).to.exist;
+		[1, 2, 5].forEach((c, i) => expect(slice.cellSlices[i].textSlice).eq(lines[c - 1]));
 		const cellCounts = slice.cellSlices.map(cell => cell.cell.executionCount);
-		[1, 2, 5].forEach(c => expect(cellCounts).to.include(c));
 		[3, 4].forEach(c => expect(cellCounts).to.not.include(c));
 	});
 
@@ -114,7 +134,7 @@ describe('log-slicer', () => {
 				["2", "q = 2"],
 				["0", "x = 20\nprint(x)"]
 			];
-			const cells = lines.map(([pid, text], i) => new LogCell({ text: text, executionCount: i + 1, persistentId: pid }));
+			const cells = lines.map(([pid, text], i) => new TestCell(text, i + 1, undefined, pid));
 			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
 			cells.forEach(cell => logSlicer.logExecution(cell));
 
@@ -132,7 +152,7 @@ describe('log-slicer', () => {
 				["2", "q = 2"],
 				["0", "x = 20\nprint(x)"],
 			];
-			const cells = lines.map(([pid, text], i) => new LogCell({ text: text, executionCount: i + 1, persistentId: pid }));
+			const cells = lines.map(([pid, text], i) => new TestCell(text, i + 1, undefined, pid));
 			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
 			cells.forEach(cell => logSlicer.logExecution(cell));
 
@@ -151,7 +171,7 @@ describe('log-slicer', () => {
 				["2", "z = y*x"],
 				["0", "x = 3"],
 			];
-			const cells = lines.map(([pid, text], i) => new LogCell({ text, persistentId: pid, executionCount: i + 1 }));
+			const cells = lines.map(([pid, text], i) => new TestCell(text, i + 1, undefined, pid));
 			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
 			cells.forEach(cell => logSlicer.logExecution(cell));
 			const lastEvent = logSlicer.cellExecutions[logSlicer.cellExecutions.length - 1].cell.executionEventId;
@@ -168,7 +188,7 @@ describe('log-slicer', () => {
 				["1", "y = 2*x"],
 				["2", "z = x*y"],
 			];
-			const cells = lines.map(([pid, text], i) => new LogCell({ text, persistentId: pid, executionCount: i + 1 }));
+			const cells = lines.map(([pid, text], i) => new TestCell(text, i + 1, undefined, pid));
 			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
 			cells.forEach(cell => logSlicer.logExecution(cell));
 			const deps = logSlicer.getDependentCells(logSlicer.cellExecutions[0].cell.executionEventId);
@@ -183,7 +203,7 @@ describe('log-slicer', () => {
 				["2", "z = y*x"],
 				["0", "x = 3"],
 			];
-			const cellEdits = edits.map(([pid, text], i) => new LogCell({ text, persistentId: pid, executionCount: i + 1 }));
+			const cellEdits = edits.map(([pid, text], i) => new TestCell(text, i + 1, undefined, pid));
 			cellEdits.forEach(cell => logSlicer.logExecution(cell));
 			const lastEvent = logSlicer.cellExecutions[logSlicer.cellExecutions.length - 1].cell.executionEventId;
 			const deps2 = logSlicer.getDependentCells(lastEvent);
@@ -202,7 +222,7 @@ describe('log-slicer', () => {
 				["4", "scatter(petal_length, petal_width, c=clusters)"],
 				["2", "k=4"],
 			];
-			const cells = lines.map(([pid, text], i) => new LogCell({ text: text, executionCount: i + 1, persistentId: pid }));
+			const cells = lines.map(([pid, text], i) => new TestCell(text, i + 1, undefined, pid));
 			const logSlicer = new ExecutionLogSlicer(new DataflowAnalyzer());
 			cells.forEach(cell => logSlicer.logExecution(cell));
 

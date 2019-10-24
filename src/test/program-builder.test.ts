@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ProgramBuilder } from '../program-builder';
-import { Cell, LogCell } from '../cell';
+import { Cell } from '../cell';
+import { TestCell } from './testcell';
 
 describe('program builder', () => {
   function createCell(
@@ -8,7 +9,7 @@ describe('program builder', () => {
     text: string,
     executionCount?: number
   ): Cell {
-    return new LogCell({ executionEventId, text, executionCount });
+    return new TestCell(text, executionCount, executionEventId);
   }
 
   let programBuilder: ProgramBuilder;
